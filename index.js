@@ -7,7 +7,10 @@ import {
   snapshotMatches,
 } from './src/core.js';
 
+import { validateBackendUrl } from './src/connection.js';
+
 const MODULE_NAME = 'st_vertex_polish';
+let sessionToken = '';
 const TOKEN_SESSION_KEY = 'stvp.token.session';
 const TOKEN_LOCAL_KEY = 'stvp.token.local';
 const MAX_INPUT_CHARS = 20000;
@@ -73,48 +76,44 @@ function persistSettings() {
 }
 
 function readToken() {
+  if (sessionToken) return sessionToken;
   try {
-    const session = sessionStorage.getItem(TOKEN_SESSION_KEY);
-    if (session) {
-      return session;
-    }
-  } catch {
-    // Storage can be unavailable in hardened WebViews.
-  }
-  try {
-    return getSettings().rememberToken ? (localStorage.getItem(TOKEN_LOCAL_KEY) || '') : '';
-  } catch {
-    return '';
-  }
+    // Migrate a prior session token into memory, then remove stored copies.
+    sessionToken = sessionStorage.getItem(TOKEN_SESSION_KEY) || '';
+    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    if (!sessionToken && getSettings().rememberToken) sessionToken = localStorage.getItem(TOKEN_LOCAL_KEY) || '';
+  } catch { /* Storage may be disabled. */ }
+  return sessionToken;
 }
 
 function writeToken(value) {
-  const token = String(value ?? '');
+  sessionToken = String(value ?? '').trim();
   try {
-    sessionStorage.setItem(TOKEN_SESSION_KEY, token);
-  } catch {
-    // Ignore storage failures.
-  }
-  try {
-    if (getSettings().rememberToken) {
-      localStorage.setItem(TOKEN_LOCAL_KEY, token);
-    } else {
-      localStorage.removeItem(TOKEN_LOCAL_KEY);
-    }
-  } catch {
-    // Ignore storage failures.
-  }
+    sessionStorage.removeItem(TOKEN_SESSION_KEY);
+    if (getSettings().rememberToken) localStorage.setItem(TOKEN_LOCAL_KEY, sessionToken);
+    else localStorage.removeItem(TOKEN_LOCAL_KEY);
+  } catch { /* Memory-only mode still works. */ }
+  if (ui) ui.token.value = '';
 }
 
 function normalizeBaseUrl(value) {
-  let url = String(value ?? '').trim();
-  if (!url) {
-    return '';
+  return validateBackendUrl(value);
+}
+
+async function privateFetch(base, path, token, options = {}) {
+  // Destination changes require confirmation before any secret leaves the page.
+  if (getSettings().trustedBackend !== base) {
+    if (!globalThis.confirm(`是否向此后端发送私人访问口令？\n${base}\n\n请核对这是你自己的 Cloud Run 地址。`)) {
+      throw new Error('已取消连接，未发送访问口令。');
+    }
+    getSettings().trustedBackend = base;
+    persistSettings();
   }
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
-    url = `https://${url}`;
-  }
-  return url.replace(/\/+$/, '').replace(/\/api\/polish$/i, '');
+  return fetch(`${base}${path}`, {
+    ...options,
+    credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer', cache: 'no-store',
+    headers: { ...options.headers, Authorization: `Bearer ${token}` },
+  });
 }
 
 function $(id) {
@@ -299,15 +298,14 @@ async function refreshModels({ silent = false } = {}) {
   }
 
   try {
-    const response = await fetch(`${baseUrl}/api/models`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const response = await privateFetch(baseUrl, '/api/models', token, { signal: AbortSignal.timeout(15000) });
     const data = await readJson(response);
     if (!response.ok) {
       throw new Error(formatHttpError(response, data));
     }
     const models = Array.isArray(data?.models) ? data.models.filter(model => typeof model === 'string') : [];
     populateModelSelect(models, typeof data?.defaultModel === 'string' ? data.defaultModel : '', getSettings().model);
+    $('stvp-connection-status').textContent = `连接成功 · ${data.location || 'Vertex'} · ${models.length} 个预置模型（非实时 Google 目录）`;
     if (!silent) {
       setStatus(`已拉取 ${models.length} 个模型`, 'ok');
     }
@@ -517,7 +515,7 @@ async function runPolish() {
   ui.meta.textContent = `预设条目 ${built.presetInfo.used} 条，跳过 ${built.presetInfo.skipped} 条；发送 ${built.composed.chars} 字符。`;
 
   try {
-    const response = await fetch(`${baseUrl}/api/polish`, {
+    const response = await privateFetch(baseUrl, '/api/polish', token, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -761,7 +759,7 @@ function mountUi() {
   const root = document.createElement('div');
   root.id = 'stvp-root';
   root.innerHTML = `
-    <button id="stvp-fab" type="button" title="Vertex 润色">润色</button>
+    <button id="stvp-fab" type="button" title="Vertex 润色">✦ 润色</button>
     <section id="stvp-panel" class="stvp-hidden" aria-label="Vertex 润色">
       <header class="stvp-header">
         <div class="stvp-heading">
@@ -782,13 +780,16 @@ function mountUi() {
           </label>
           <label class="stvp-field">
             <span>访问口令</span>
-            <input id="stvp-token" type="password" placeholder="POLISH_ACCESS_TOKEN" autocomplete="current-password">
+            <input id="stvp-token" type="password" placeholder="粘贴后端口令（不是 Google JSON）" autocomplete="off" spellcheck="false" autocapitalize="off">
+            <span class="stvp-hint">填写后输入框自动清空，口令默认仅留在本页内存中。</span>
           </label>
           <label class="stvp-check">
             <input id="stvp-remember" type="checkbox">
             <span>在本设备记住口令</span>
           </label>
-          <p class="stvp-hint">口令只保存在浏览器；后端地址、预设和自定义要求会写入酒馆扩展设置。不要把口令提交到公开仓库。</p>
+          <p class="stvp-hint">记住口令会明文写入本设备存储，不推荐在共享设备开启。Google JSON 只放后端，切勿粘贴到这里。</p>
+          <div class="stvp-actions"><button id="stvp-check" type="button">验证连接 / 拉取列表</button><button id="stvp-lock" type="button">清除口令</button></div>
+          <p id="stvp-connection-status" class="stvp-hint" role="status">尚未验证连接</p>
         </details>
 
         <div class="stvp-row">
@@ -881,7 +882,7 @@ function mountUi() {
     refreshPresets();
   });
   ui.run.addEventListener('click', () => {
-    runPolish();
+    runPolish().catch(error => showError(error.message));
   });
   ui.apply.addEventListener('click', () => {
     applyPolish();
@@ -894,12 +895,24 @@ function mountUi() {
     getSettings().backendUrl = ui.url.value.trim();
     persistSettings();
   });
-  ui.token.addEventListener('input', () => {
+  ui.token.addEventListener('change', () => {
     writeToken(ui.token.value);
+    $('stvp-connection-status').textContent = readToken() ? '口令已暂存（未验证）' : '尚未填写口令';
+  });
+  $('stvp-lock').addEventListener('click', () => {
+    invalidatePending('已锁定连接');
+    getSettings().rememberToken = false;
+    ui.remember.checked = false;
+    writeToken('');
+    persistSettings();
+    $('stvp-connection-status').textContent = '口令已清除，请重新填写';
+  });
+  $('stvp-check').addEventListener('click', () => {
+    refreshModels().catch(error => showError(error.message));
   });
   ui.remember.addEventListener('change', () => {
     getSettings().rememberToken = ui.remember.checked;
-    writeToken(ui.token.value);
+    writeToken(readToken());
     persistSettings();
   });
   ui.custom.addEventListener('input', () => {
@@ -911,7 +924,7 @@ function mountUi() {
     persistSettings();
   });
   ui.modelRefresh.addEventListener('click', () => {
-    refreshModels();
+    refreshModels().catch(error => showError(error.message));
   });
   ui.model.addEventListener('change', () => {
     getSettings().model = ui.model.value;
@@ -934,16 +947,50 @@ function mountUi() {
   }
 }
 
-async function init() {
-  if (initialized) {
-    return;
+function mountMenuEntry() {
+  // Add an item to the menu opened by #extensionsMenuButton; do not replace
+  // the host button or intercept its existing handlers.
+  const menu = document.getElementById('extensionsMenu');
+  if (menu && !document.getElementById('stvp-menu-entry')) {
+    const entry = document.createElement('div');
+    entry.id = 'stvp-menu-entry';
+    entry.className = 'list-group-item flex-container flexGap5';
+    entry.setAttribute?.('role', 'button');
+    entry.setAttribute?.('tabindex', '0');
+    entry.innerHTML = '<span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span><span>Vertex 润色</span>';
+    entry.addEventListener('click', openPanel);
+    entry.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel(); }
+    });
+    menu.append(entry);
+    if (ui) $('stvp-fab').classList.add('stvp-hidden');
   }
-  initialized = true;
+  // A settings launcher remains available even if an APK changes menu markup.
+  const settings = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
+  if (settings && !document.getElementById('stvp-settings-entry')) {
+    const entry = document.createElement('button');
+    entry.id = 'stvp-settings-entry';
+    entry.className = 'menu_button';
+    entry.textContent = '✦ Vertex 润色 · 打开设置';
+    entry.addEventListener('click', () => { openPanel(); ui.settings.open = true; });
+    settings.append(entry);
+  }
+}
+
+async function init() {
+  if (initialized) return;
   mountUi();
+  initialized = true;
+  mountMenuEntry();
+  if (typeof MutationObserver === 'function') {
+    const observer = new MutationObserver(mountMenuEntry);
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 
   const settings = getSettings();
   ui.url.value = settings.backendUrl;
-  ui.token.value = readToken();
+  readToken();
+  ui.token.value = '';
   ui.remember.checked = Boolean(settings.rememberToken);
   ui.custom.value = settings.customPrompt;
 
@@ -965,8 +1012,15 @@ async function init() {
 
 function boot(attempt = 0) {
   const context = globalThis.SillyTavern?.getContext?.();
-  if (context?.eventSource?.on && context?.eventTypes?.APP_READY) {
-    context.eventSource.on(context.eventTypes.APP_READY, init);
+  if (context && document.body && context.extensionSettings) {
+    // Some clients do not replay APP_READY for late-loaded extensions.
+    // Mount immediately and also accept the lifecycle notification, idempotently.
+    const start = () => init().catch(error => {
+      initialized = Boolean(ui);
+      if (ui) showError(`初始化失败：${error.message}`);
+    });
+    start();
+    if (context.eventSource?.on && context.eventTypes?.APP_READY) context.eventSource.on(context.eventTypes.APP_READY, start);
     return;
   }
   if (attempt < 300) {

@@ -87,8 +87,8 @@ class FakeElement {
     this.options.push(option);
   }
 
-  append() {
-    // No-op.
+  append(child) {
+    if (child?.id) elements.set(child.id, child);
   }
 
   get innerHTML() {
@@ -223,6 +223,8 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   t.after(() => {
     globalThis.fetch = realFetch;
   });
+  globalThis.confirm = () => true;
+  elements.set('extensionsMenu', new FakeElement('extensionsMenu'));
   await import('../index.js');
   const ready = handlers.get('APP_READY') || [];
   assert.equal(ready.length, 1);
@@ -248,6 +250,11 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(fetchCalls.length, 1);
   assert.equal(fetchCalls[0].url, 'https://backend.test/api/polish');
   assert.equal(fetchCalls[0].init.headers.Authorization, 'Bearer token-1234567890');
+  assert.equal(fetchCalls[0].init.redirect, 'error');
+  assert.equal(fetchCalls[0].init.credentials, 'omit');
+  assert.equal(fetchCalls[0].init.referrerPolicy, 'no-referrer');
+  assert.equal(document.getElementById('stvp-token').value, '');
+  assert.ok(document.getElementById('stvp-menu-entry'));
   const body = JSON.parse(fetchCalls[0].init.body);
   assert.equal(body.model, 'gemini-3.8-flash');
   assert.match(body.systemInstruction, /Write as Alice/);
@@ -306,4 +313,8 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   await tick();
   assert.equal(context.chat[0].mes, 'b');
   assert.deepEqual(context.chat[0].swipes, ['a', 'b']);
+  document.getElementById('stvp-lock').click();
+  assert.equal(localStorage.getItem('stvp.token.local'), null);
+  assert.equal(sessionStorage.getItem('stvp.token.session'), null);
+  assert.equal(document.getElementById('stvp-token').value, '');
 });

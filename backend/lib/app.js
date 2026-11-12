@@ -340,7 +340,6 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
           status: 500,
           ms: now() - startedAt,
           code: errorCode,
-          message: error?.message,
         });
       }
     }

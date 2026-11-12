@@ -313,6 +313,20 @@
   border-color: color-mix(in srgb, var(--stvp-accent) 55%, var(--stvp-border));
 }
 
+/* Card layout, theme-aware contrast, and finger-friendly controls. */
+#stvp-panel { width: min(460px, calc(100vw - 24px)); border-radius: 18px; }
+#stvp-root .stvp-header { background: linear-gradient(120deg, rgba(122,167,255,.14), transparent); padding: 14px; }
+#stvp-root .stvp-body { gap: 14px; padding: 14px; min-height: 0; overscroll-behavior: contain; }
+#stvp-root .stvp-settings { padding: 12px; background: rgba(127,127,127,.07); }
+#stvp-root .stvp-settings[open] { display: flex; flex-direction: column; gap: 12px; }
+#stvp-root .stvp-settings summary { font-size: 14px; font-weight: 600; color: var(--stvp-fg); }
+#stvp-root button { touch-action: manipulation; }
+#stvp-root .stvp-body button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--stvp-border); border-radius: 10px; color: var(--stvp-fg); background: rgba(127,127,127,.1); cursor: pointer; }
+#stvp-root input, #stvp-root select { min-height: 44px; }
+#stvp-root button:focus-visible { outline: 2px solid var(--stvp-accent); outline-offset: 2px; }
+#stvp-menu-entry { cursor: pointer; min-height: 40px; align-items: center; }
+#stvp-root .stvp-head-actions button { width: 40px; height: 40px; }
+
 @media (max-width: 600px) {
   #stvp-panel {
     left: 8px;

@@ -110,6 +110,7 @@ export function createVertexClient({ config, getAccessToken, fetchImpl = globalT
     try {
       response = await fetchImpl(url, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json; charset=utf-8',

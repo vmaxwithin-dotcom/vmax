@@ -49,7 +49,10 @@ export function createTokenProvider(serviceAccount, { fetchImpl = globalThis.fet
   if (!serviceAccount?.client_email || !serviceAccount?.private_key) {
     throw new Error('createTokenProvider requires client_email and private_key');
   }
-  const tokenUri = serviceAccount.token_uri || 'https://oauth2.googleapis.com/token';
+  const tokenUri = 'https://oauth2.googleapis.com/token';
+  if (serviceAccount.token_uri && serviceAccount.token_uri !== tokenUri) {
+    throw new Error('Only the official Google OAuth token endpoint is allowed');
+  }
   let cached = null;
   let inflight = null;
 
@@ -72,6 +75,8 @@ export function createTokenProvider(serviceAccount, { fetchImpl = globalThis.fet
 
     const response = await fetchImpl(tokenUri, {
       method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(15000),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
