@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+*.log
+sa.json
+sa-*.json
+*-key.json
+backend/sa.json
+backend/.env
+.DS_Store
+st-vertex-polish.zip

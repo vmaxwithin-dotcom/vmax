@@ -1,0 +1,14 @@
+{
+  "name": "st-vertex-polish-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private Cloud Run backend that calls Vertex AI for the SillyTavern polish extension",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/run-all.js"
+  }
+}

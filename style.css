@@ -1,0 +1,330 @@
+#stvp-root {
+  --stvp-bg: var(--SmartThemeBlurTintColor, rgba(20, 20, 24, 0.96));
+  --stvp-fg: var(--SmartThemeBodyColor, #ececec);
+  --stvp-muted: var(--SmartThemeEmColor, #9aa0a6);
+  --stvp-border: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16));
+  --stvp-accent: var(--SmartThemeQuoteColor, #7aa7ff);
+  --stvp-danger: #ff7b72;
+  --stvp-ok: #7ee787;
+  --stvp-warn: #e3b341;
+  font-size: 15px;
+}
+
+#stvp-fab {
+  position: fixed;
+  right: 12px;
+  bottom: 96px;
+  z-index: 30001;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--stvp-border);
+  background: var(--stvp-bg);
+  color: var(--stvp-fg);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  backdrop-filter: blur(8px);
+}
+
+#stvp-fab:hover {
+  border-color: var(--stvp-accent);
+}
+
+#stvp-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 30000;
+  width: min(400px, calc(100vw - 24px));
+  max-height: 78vh;
+  max-height: min(78dvh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--stvp-border);
+  border-radius: 14px;
+  background: var(--stvp-bg);
+  color: var(--stvp-fg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+#stvp-panel.stvp-hidden {
+  display: none;
+}
+
+#stvp-panel.stvp-minimized .stvp-body {
+  display: none;
+}
+
+.stvp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--stvp-border);
+  flex: 0 0 auto;
+}
+
+.stvp-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stvp-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.stvp-target {
+  color: var(--stvp-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stvp-head-actions {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.stvp-head-actions button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--stvp-fg);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.stvp-head-actions button:hover {
+  border-color: var(--stvp-border);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.stvp-body {
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stvp-settings {
+  border: 1px solid var(--stvp-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.stvp-settings summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--stvp-muted);
+  user-select: none;
+}
+
+.stvp-settings[open] summary {
+  margin-bottom: 8px;
+}
+
+.stvp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--stvp-muted);
+  min-width: 0;
+}
+
+.stvp-field input,
+.stvp-field select,
+.stvp-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--stvp-border);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--stvp-fg);
+  font-size: 16px;
+  font-family: inherit;
+}
+
+.stvp-field textarea {
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.45;
+}
+
+.stvp-field input:focus,
+.stvp-field select:focus,
+.stvp-field textarea:focus {
+  outline: none;
+  border-color: var(--stvp-accent);
+}
+
+.stvp-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.stvp-grow {
+  flex: 1 1 auto;
+}
+
+.stvp-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--stvp-muted);
+  margin-top: 6px;
+}
+
+.stvp-check input {
+  width: 16px;
+  height: 16px;
+}
+
+.stvp-hint {
+  margin: 6px 0 0;
+  color: var(--stvp-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.stvp-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.stvp-actions button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--stvp-border);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--stvp-fg);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.stvp-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.stvp-primary {
+  border-color: var(--stvp-accent) !important;
+  background: rgba(122, 167, 255, 0.18) !important;
+  border-color: color-mix(in srgb, var(--stvp-accent) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--stvp-accent) 22%, transparent) !important;
+}
+
+.stvp-secondary:hover,
+.stvp-actions button:hover:not(:disabled) {
+  border-color: var(--stvp-accent);
+}
+
+.stvp-status {
+  color: var(--stvp-muted);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.stvp-status[data-kind="ok"] {
+  color: var(--stvp-ok);
+}
+
+.stvp-status[data-kind="warn"] {
+  color: var(--stvp-warn);
+}
+
+.stvp-status[data-kind="error"] {
+  color: var(--stvp-danger);
+}
+
+.stvp-error {
+  color: var(--stvp-danger);
+  background: rgba(255, 123, 114, 0.08);
+  border: 1px solid rgba(255, 123, 114, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.stvp-error.stvp-hidden {
+  display: none;
+}
+
+.stvp-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--stvp-border);
+  padding-top: 10px;
+}
+
+.stvp-result.stvp-hidden {
+  display: none;
+}
+
+.stvp-label {
+  font-size: 12px;
+  color: var(--stvp-muted);
+  margin-top: 2px;
+}
+
+.stvp-text {
+  max-height: 160px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--stvp-border);
+  background: rgba(0, 0, 0, 0.16);
+}
+
+#stvp-polished {
+  border-color: var(--stvp-accent);
+  border-color: color-mix(in srgb, var(--stvp-accent) 55%, var(--stvp-border));
+}
+
+@media (max-width: 600px) {
+  #stvp-panel {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    max-height: 80vh;
+    max-height: 80dvh;
+  }
+
+  #stvp-fab {
+    right: 10px;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .stvp-actions button {
+    flex: 1 1 auto;
+  }
+}
