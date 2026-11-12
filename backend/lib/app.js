@@ -161,6 +161,33 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       return;
     }
 
+    const authorization = req.headers.authorization;
+    const bearer = typeof authorization === 'string' ? /^Bearer\s+(.+)$/i.exec(authorization) : null;
+    const provided = bearer ? bearer[1].trim() : '';
+    if (!provided || !safeEqual(provided, config.accessToken)) {
+      errorCode = 'unauthorized';
+      sendJson(res, 401, { error: errorCode, message: '访问口令无效', requestId });
+      log({ requestId, method: req.method, path, status: 401, ms: now() - startedAt, code: errorCode });
+      return;
+    }
+
+    if (path === '/api/models') {
+      if (req.method !== 'GET') {
+        errorCode = 'method_not_allowed';
+        sendJson(res, 405, { error: errorCode, message: 'Use GET', requestId }, { Allow: 'GET, OPTIONS' });
+        log({ requestId, method: req.method, path, status: 405, ms: now() - startedAt, code: errorCode });
+        return;
+      }
+      sendJson(res, 200, {
+        models: config.availableModels,
+        defaultModel: config.model,
+        location: config.location,
+        requestId,
+      });
+      log({ requestId, method: req.method, path, status: 200, ms: now() - startedAt });
+      return;
+    }
+
     if (path !== '/api/polish') {
       errorCode = 'not_found';
       sendJson(res, 404, { error: errorCode, message: 'Not found', requestId });
@@ -172,16 +199,6 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       errorCode = 'method_not_allowed';
       sendJson(res, 405, { error: errorCode, message: 'Use POST', requestId }, { Allow: 'POST, OPTIONS' });
       log({ requestId, method: req.method, path, status: 405, ms: now() - startedAt, code: errorCode });
-      return;
-    }
-
-    const authorization = req.headers.authorization;
-    const bearer = typeof authorization === 'string' ? /^Bearer\s+(.+)$/i.exec(authorization) : null;
-    const provided = bearer ? bearer[1].trim() : '';
-    if (!provided || !safeEqual(provided, config.accessToken)) {
-      errorCode = 'unauthorized';
-      sendJson(res, 401, { error: errorCode, message: '访问口令无效', requestId });
-      log({ requestId, method: req.method, path, status: 401, ms: now() - startedAt, code: errorCode });
       return;
     }
 
@@ -219,6 +236,16 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
     if (systemInstruction !== undefined && typeof systemInstruction !== 'string') {
       errorCode = 'invalid_request';
       sendJson(res, 400, { error: errorCode, message: 'systemInstruction 必须是字符串', requestId });
+      log({ requestId, method: req.method, path, status: 400, ms: now() - startedAt, code: errorCode });
+      return;
+    }
+
+    const requestedModel = typeof body.model === 'string' && body.model.trim()
+      ? body.model.trim()
+      : config.model;
+    if (!/^[a-z0-9._-]{2,100}$/i.test(requestedModel)) {
+      errorCode = 'invalid_request';
+      sendJson(res, 400, { error: errorCode, message: 'model 名称无效', requestId });
       log({ requestId, method: req.method, path, status: 400, ms: now() - startedAt, code: errorCode });
       return;
     }
@@ -264,6 +291,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
 
     try {
       const result = await vertex({
+        model: requestedModel,
         systemInstruction: typeof systemInstruction === 'string' ? systemInstruction.trim() : '',
         prompt,
         generationConfig,
@@ -271,7 +299,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
 
       sendJson(res, 200, {
         text: result.text,
-        model: config.model,
+        model: requestedModel,
         finishReason: result.finishReason,
         truncated: Boolean(result.truncated),
         usage: result.usage,
@@ -283,7 +311,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
         path,
         status: 200,
         ms: now() - startedAt,
-        model: config.model,
+        model: requestedModel,
         inputChars: totalChars,
         outputChars: result.text.length,
         truncated: Boolean(result.truncated),

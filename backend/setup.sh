@@ -17,7 +17,7 @@ set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?set PROJECT_ID to your Google Cloud project id}"
 REGION="${REGION:-us-central1}"
-MODEL="${MODEL:-gemini-3.5-flash}"
+MODEL="${MODEL:-gemini-3.8-flash}"
 SERVICE="${SERVICE:-st-vertex-polish}"
 SA_NAME="${SA_NAME:-st-vertex-polish}"
 SA_EMAIL="${SA_EMAIL:-$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com}"

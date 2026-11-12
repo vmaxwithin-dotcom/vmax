@@ -14,6 +14,7 @@ Google 服务账号 JSON 只放在独立后端（Cloud Run + Secret Manager）�
 - 只润色最新一条 AI 回复的当前 swipe 版本；发送前固定快照。
 - 请求期间禁止重复点击；切换聊天、切换 swipe、编辑或删除消息会作废旧结果。
 - 原文 / 结果纯文本预览，确认后写回酒馆并保存；支持一次撤销。
+- 模型下拉选择：从后端拉取可选模型，也可以直接填任何自定义模型名。
 - 后端校验访问口令、来源、输入长度、模型参数、调用间隔和每日次数。
 - Google 安全过滤保持开启；拦截时返回明确原因，不自动重试。
 
@@ -201,9 +202,10 @@ SillyTavern/public/scripts/extensions/third-party/st-vertex-polish/
 点页面右下角的 **润色** 按钮：
 
 1. 展开“连接设置”，填 Cloud Run 的 `Backend URL` 和访问口令。
-2. 点“刷新”，选择要套用的酒馆预设；也可以选“不使用预设”。
-3. 填写自定义润色要求（可留空）。
-4. 点“开始润色”，检查原文/结果，点“替换当前回复”。
+2. 点预设旁边的“刷新”，选择要套用的酒馆预设；也可以选“不使用预设”。
+3. 点模型旁边的“拉取”，从后端拿到可选模型；选不到时选“自定义模型名…”，直接填模型 ID。
+4. 填写自定义润色要求（可留空）。
+5. 点“开始润色”，检查原文/结果，点“替换当前回复”。
 
 口令默认只保存在当前页面会话（`sessionStorage`）。勾选“在本设备记住口令”才会写入 `localStorage`，公共设备上不要勾。
 
@@ -268,6 +270,7 @@ Authorization: Bearer <POLISH_ACCESS_TOKEN>
 Content-Type: application/json
 
 {
+  "model": "gemini-3.8-flash",
   "systemInstruction": "...",
   "prompt": "...",
   "temperature": 0.8,
@@ -276,12 +279,14 @@ Content-Type: application/json
 }
 ```
 
+`model` 可省略；省略时使用后端的 `VERTEX_MODEL`。
+
 成功：
 
 ```json
 {
   "text": "润色后的正文",
-  "model": "gemini-3.5-flash",
+  "model": "gemini-3.8-flash",
   "finishReason": "STOP",
   "truncated": false,
   "usage": { "totalTokenCount": 1234 },
@@ -302,6 +307,17 @@ Content-Type: application/json
 | 502 | `upstream_error` | Vertex 返回错误 |
 | 504 | `timeout` | 等待 Vertex 超时 |
 
+`GET /api/models`（需要口令）返回扩展下拉列表：
+
+```json
+{
+  "models": ["gemini-3.8-flash", "gemini-3.7-flash", "..."],
+  "defaultModel": "gemini-3.8-flash",
+  "location": "global",
+  "requestId": "..."
+}
+```
+
 `GET /health` 返回 `{ "ok": true }`，不需要口令，方便 Cloud Run 探活。
 
 ### 环境变量
@@ -310,8 +326,9 @@ Content-Type: application/json
 | --- | --- | --- |
 | `POLISH_ACCESS_TOKEN` | 必填 | 至少 16 字符 |
 | `GOOGLE_CLOUD_PROJECT` | 服务账号 JSON 的 `project_id` | 项目 ID |
-| `GOOGLE_CLOUD_LOCATION` | `us-central1` | 区域；也支持 `global` |
-| `VERTEX_MODEL` | `gemini-3.5-flash` | 必须是项目和区域里可用的模型 |
+| `GOOGLE_CLOUD_LOCATION` | `global` | Vertex 区域；也支持 `us-central1` 等 |
+| `VERTEX_MODEL` | `gemini-3.8-flash` | 默认模型；必须是项目和区域里可用的模型 |
+| `AVAILABLE_MODELS` | 内置 6 个模型 | 逗号分隔，扩展“拉取”时显示；可自定义 |
 | `VERTEX_API_VERSION` | `v1` | 可选 `v1` / `v1beta1` / `v1p1`；新模型在 `v1` 不可用时试 `v1beta1` |
 | `ALLOWED_ORIGINS` | `*` | 逗号分隔；WebView 的 `file://` 来源是 `null` |
 | `MAX_INPUT_CHARS` | `20000` | system + prompt 合计字符上限 |
@@ -323,7 +340,7 @@ Content-Type: application/json
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | 空 | 直接内联 JSON，仅本地调试用 |
 | `PORT` | `8080` | Cloud Run 注入 |
 
-模型、区域和 API 生命周期会变化。部署前请在 Model Garden 确认 `gemini-3.5-flash` 在你选择的区域可用；如果返回模型不存在，改成你项目里可用的模型（例如 `gemini-3.7-flash`），或把区域设为 `global` 再试。
+模型、区域和 API 生命周期会变化。默认是 `gemini-3.8-flash` + `global`；如果返回模型不存在，在酒馆窗口里点“拉取”换模型，或直接填自定义模型名。`AVAILABLE_MODELS` 只控制下拉列表，后端允许请求任何合法模型名。
 
 ---
 
@@ -377,7 +394,7 @@ Content-Type: application/json
 
 ## 测试
 
-本仓库自带 42 个 Node 测试，不依赖真实 Google 凭据：
+本仓库自带 43 个 Node 测试，不依赖真实 Google 凭据：
 
 ```bash
 node tests/run-all.js

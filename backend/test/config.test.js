@@ -7,13 +7,15 @@ const TOKEN = 'x'.repeat(32);
 test('loadConfig applies defaults and parses origins', () => {
   const config = loadConfig({ POLISH_ACCESS_TOKEN: TOKEN });
   assert.equal(config.port, 8080);
-  assert.equal(config.location, 'us-central1');
-  assert.equal(config.model, 'gemini-3.5-flash');
+  assert.equal(config.location, 'global');
+  assert.equal(config.model, 'gemini-3.8-flash');
+  assert.ok(config.availableModels.includes('gemini-3.8-flash'));
   assert.deepEqual(config.allowedOrigins, ['*']);
   assert.equal(config.dailyLimit, 100);
   assert.equal(config.minIntervalMs, 3000);
   assert.equal(config.maxInputChars, 20000);
   assert.equal(config.maxOutputTokens, 8192);
+  assert.equal(config.requestTimeoutMs, 60000);
   assert.equal(config.apiVersion, 'v1');
 
   const origins = loadConfig({
@@ -40,6 +42,10 @@ test('loadConfig rejects invalid numeric values and identifiers', () => {
   assert.throws(
     () => loadConfig({ POLISH_ACCESS_TOKEN: TOKEN, VERTEX_MODEL: 'bad model/name' }),
     /VERTEX_MODEL/,
+  );
+  assert.throws(
+    () => loadConfig({ POLISH_ACCESS_TOKEN: TOKEN, AVAILABLE_MODELS: 'good-model,bad model' }),
+    /AVAILABLE_MODELS/,
   );
   assert.throws(
     () => loadConfig({ POLISH_ACCESS_TOKEN: TOKEN, GOOGLE_CLOUD_LOCATION: 'us central' }),

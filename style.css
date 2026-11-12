@@ -10,6 +10,10 @@
   font-size: 15px;
 }
 
+#stvp-root .stvp-hidden {
+  display: none !important;
+}
+
 #stvp-fab {
   position: fixed;
   right: 12px;

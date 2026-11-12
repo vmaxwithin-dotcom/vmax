@@ -13,9 +13,20 @@ const TOKEN_LOCAL_KEY = 'stvp.token.local';
 const MAX_INPUT_CHARS = 20000;
 const CLIENT_TIMEOUT_MS = 90000;
 
+const DEFAULT_MODELS = Object.freeze([
+  'gemini-3.8-flash',
+  'gemini-3.7-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+]);
+
 const DEFAULT_SETTINGS = Object.freeze({
   backendUrl: '',
   presetName: '',
+  model: '',
+  customModel: '',
   customPrompt: '',
   rememberToken: false,
 });
@@ -237,6 +248,90 @@ async function refreshPresets() {
   }
 }
 
+function toggleCustomModel() {
+  if (!ui) {
+    return;
+  }
+  const isCustom = ui.model.value === '__custom__';
+  ui.modelCustomWrap.classList.toggle('stvp-hidden', !isCustom);
+}
+
+function populateModelSelect(models, defaultModel, saved) {
+  const select = ui.model;
+  const list = Array.isArray(models) && models.length > 0 ? [...models] : [...DEFAULT_MODELS];
+  const savedModel = saved === '__default__' ? '' : saved;
+  if (savedModel && savedModel !== '__custom__' && !list.includes(savedModel)) {
+    list.unshift(savedModel);
+  }
+
+  select.innerHTML = '';
+  select.add(new Option(defaultModel ? `后端默认（${defaultModel}）` : '后端默认', '__default__'));
+  for (const model of list) {
+    select.add(new Option(model, model));
+  }
+  select.add(new Option('自定义模型名…', '__custom__'));
+
+  if (savedModel === '__custom__') {
+    select.value = '__custom__';
+  } else if (savedModel && list.includes(savedModel)) {
+    select.value = savedModel;
+  } else if (defaultModel && list.includes(defaultModel)) {
+    select.value = defaultModel;
+  } else {
+    select.value = '__default__';
+  }
+
+  getSettings().model = select.value;
+  ui.modelCustom.value = getSettings().customModel || '';
+  toggleCustomModel();
+  persistSettings();
+}
+
+async function refreshModels({ silent = false } = {}) {
+  if (!ui) {
+    return;
+  }
+  const baseUrl = normalizeBaseUrl(ui.url.value || getSettings().backendUrl);
+  const token = ui.token.value || readToken();
+  if (!baseUrl || !token) {
+    populateModelSelect(DEFAULT_MODELS, '', getSettings().model);
+    return;
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/api/models`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await readJson(response);
+    if (!response.ok) {
+      throw new Error(formatHttpError(response, data));
+    }
+    const models = Array.isArray(data?.models) ? data.models.filter(model => typeof model === 'string') : [];
+    populateModelSelect(models, typeof data?.defaultModel === 'string' ? data.defaultModel : '', getSettings().model);
+    if (!silent) {
+      setStatus(`已拉取 ${models.length} 个模型`, 'ok');
+    }
+  } catch (error) {
+    populateModelSelect(DEFAULT_MODELS, '', getSettings().model);
+    if (!silent) {
+      setStatus(`拉取模型失败：${error?.message || String(error)}`, 'warn');
+    }
+  }
+}
+
+function selectedModel() {
+  if (!ui) {
+    return '';
+  }
+  if (ui.model.value === '__custom__') {
+    return ui.modelCustom.value.trim();
+  }
+  if (ui.model.value === '__default__') {
+    return '';
+  }
+  return ui.model.value;
+}
+
 async function getPresetByName(name) {
   if (!name || name === '__none__') {
     return null;
@@ -259,6 +354,14 @@ async function buildRequest() {
   const preset = await getPresetByName(presetName);
   if (presetName !== '__none__' && !preset) {
     throw new Error(`找不到预设「${presetName}」，请点刷新后重试。`);
+  }
+
+  const model = selectedModel();
+  if (ui.model.value === '__custom__' && !model) {
+    throw new Error('请填写自定义模型名。');
+  }
+  if (model && !/^[a-z0-9._-]{2,100}$/i.test(model)) {
+    throw new Error('模型名只能包含字母、数字、点、下划线和短横线。');
   }
 
   const presetInfo = buildPresetInstruction(preset, {
@@ -285,6 +388,7 @@ async function buildRequest() {
   return {
     target,
     presetName,
+    model,
     presetInfo,
     composed,
     sampling: readSampling(preset, target.text.length),
@@ -420,6 +524,7 @@ async function runPolish() {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
+        ...(built.model ? { model: built.model } : {}),
         systemInstruction: built.composed.systemInstruction,
         prompt: built.composed.prompt,
         ...built.sampling,
@@ -694,6 +799,19 @@ function mountUi() {
           <button id="stvp-refresh" type="button" class="stvp-secondary">刷新</button>
         </div>
 
+        <div class="stvp-row">
+          <label class="stvp-field stvp-grow">
+            <span>模型</span>
+            <select id="stvp-model"></select>
+          </label>
+          <button id="stvp-model-refresh" type="button" class="stvp-secondary">拉取</button>
+        </div>
+
+        <label id="stvp-model-custom-wrap" class="stvp-field stvp-hidden">
+          <span>自定义模型名</span>
+          <input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false">
+        </label>
+
         <label class="stvp-field">
           <span>自定义润色要求</span>
           <textarea id="stvp-custom" rows="3" maxlength="4000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea>
@@ -732,6 +850,10 @@ function mountUi() {
     remember: $('stvp-remember'),
     preset: $('stvp-preset'),
     refresh: $('stvp-refresh'),
+    model: $('stvp-model'),
+    modelRefresh: $('stvp-model-refresh'),
+    modelCustom: $('stvp-model-custom'),
+    modelCustomWrap: $('stvp-model-custom-wrap'),
     custom: $('stvp-custom'),
     run: $('stvp-run'),
     status: $('stvp-status'),
@@ -788,6 +910,19 @@ function mountUi() {
     getSettings().presetName = ui.preset.value;
     persistSettings();
   });
+  ui.modelRefresh.addEventListener('click', () => {
+    refreshModels();
+  });
+  ui.model.addEventListener('change', () => {
+    getSettings().model = ui.model.value;
+    toggleCustomModel();
+    persistSettings();
+  });
+  ui.modelCustom.addEventListener('input', () => {
+    getSettings().model = '__custom__';
+    getSettings().customModel = ui.modelCustom.value;
+    persistSettings();
+  });
 
   // Keep the panel usable when an Android keyboard shrinks the visual viewport.
   const viewport = globalThis.visualViewport;
@@ -813,6 +948,7 @@ async function init() {
   ui.custom.value = settings.customPrompt;
 
   await refreshPresets();
+  await refreshModels({ silent: true });
   refreshTargetLabel();
   updateUndoButton();
 

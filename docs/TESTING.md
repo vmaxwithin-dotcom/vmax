@@ -20,8 +20,8 @@ node tests/run-all.js
 结果：
 
 ```
-tests 42
-pass 42
+tests 43
+pass 43
 fail 0
 ```
 
@@ -30,11 +30,11 @@ fail 0
 | 套件 | 数量 | 覆盖内容 |
 | --- | --- | --- |
 | `tests/core.test.js` | 11 | 当前 swipe 取文、最新 AI 消息选择、`prompt_order` 解析、marker/空条目/禁用条目跳过、宏替换、请求拼装、输入上限、采样钳制、快照校验 |
-| `tests/ui-smoke.test.js` | 1 | 假 DOM 下的扩展接线：初始化、预设下拉、润色请求、替换、撤销、迟到结果丢弃、swipe 只改当前版本 |
+| `tests/ui-smoke.test.js` | 1 | 假 DOM 下的扩展接线：初始化、预设下拉、模型下拉、润色请求、替换、撤销、迟到结果丢弃、swipe 只改当前版本 |
 | `backend/test/vertex.test.js` | 8 | Vertex URL（区域 / global）、`promptFeedback` 与 `finishReason` 安全拦截、`MAX_TOKENS` 截断、请求体结构、上游 HTTP 错误、超时、token 失败 |
 | `backend/test/google-auth.test.js` | 3 | `service_account` JSON 校验、RS256 JWT 签名与验签、token 缓存、OAuth 失败不泄露私钥 |
 | `backend/test/config.test.js` | 3 | 默认值、来源列表解析、口令长度、数值/模型/区域校验 |
-| `backend/test/app.test.js` | 16 | 健康检查、401、CORS 白名单与 `null` 来源、无效 JSON、字符/字节上限、每日与间隔限流、并发额度、参数钳制、安全拦截、截断/超时/上游/认证错误映射、405、日志脱敏 |
+| `backend/test/app.test.js` | 17 | 健康检查、模型列表、模型覆盖、401、CORS 白名单与 `null` 来源、无效 JSON/模型、字符/字节上限、每日与间隔限流、并发额度、参数钳制、安全拦截、截断/超时/上游/认证错误映射、405、日志脱敏 |
 
 ### 3. 本环境说明
 

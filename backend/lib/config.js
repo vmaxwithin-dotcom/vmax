@@ -1,8 +1,16 @@
 const DEFAULTS = Object.freeze({
   port: 8080,
-  location: 'us-central1',
-  model: 'gemini-3.5-flash',
+  location: 'global',
+  model: 'gemini-3.8-flash',
   apiVersion: 'v1',
+  availableModels: [
+    'gemini-3.8-flash',
+    'gemini-3.7-flash',
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+  ],
   maxInputChars: 20000,
   maxOutputTokens: 8192,
   dailyLimit: 100,
@@ -44,6 +52,22 @@ export function loadConfig(env = process.env) {
     throw new Error('VERTEX_MODEL contains unsupported characters');
   }
 
+  const availableModels = String(env.AVAILABLE_MODELS ?? DEFAULTS.availableModels.join(','))
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+  if (availableModels.length === 0) {
+    throw new Error('AVAILABLE_MODELS must contain at least one model id');
+  }
+  for (const availableModel of availableModels) {
+    if (!/^[a-z0-9._-]{2,100}$/i.test(availableModel)) {
+      throw new Error(`AVAILABLE_MODELS contains an invalid model id: ${availableModel}`);
+    }
+  }
+  if (!availableModels.includes(model)) {
+    availableModels.unshift(model);
+  }
+
   const apiVersion = String(env.VERTEX_API_VERSION ?? DEFAULTS.apiVersion).trim();
   if (!/^v1(beta1|p1)?$/.test(apiVersion)) {
     throw new Error('VERTEX_API_VERSION must be v1, v1beta1 or v1p1');
@@ -60,6 +84,7 @@ export function loadConfig(env = process.env) {
     project,
     location,
     model,
+    availableModels,
     apiVersion,
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : ['*'],
     maxInputChars: readInt(env, 'MAX_INPUT_CHARS', DEFAULTS.maxInputChars, 100, 100000),

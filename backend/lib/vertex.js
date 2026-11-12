@@ -76,9 +76,18 @@ export function createVertexClient({ config, getAccessToken, fetchImpl = globalT
   if (typeof fetchImpl !== 'function') {
     throw new Error('createVertexClient requires fetch');
   }
-  const url = buildVertexUrl(config);
+  const urlCache = new Map();
+  const urlFor = model => {
+    const selected = model || config.model;
+    if (!urlCache.has(selected)) {
+      urlCache.set(selected, buildVertexUrl({ ...config, model: selected }));
+    }
+    return urlCache.get(selected);
+  };
 
-  return async function generate({ systemInstruction, prompt, generationConfig }) {
+  return async function generate({ model, systemInstruction, prompt, generationConfig }) {
+    const selectedModel = model || config.model;
+    const url = urlFor(selectedModel);
     let accessToken;
     try {
       accessToken = await getAccessToken();

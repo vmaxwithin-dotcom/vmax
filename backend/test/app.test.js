@@ -14,6 +14,7 @@ function baseConfig(overrides = {}) {
     project: 'demo-project',
     location: 'us-central1',
     model: 'gemini-2.5-flash',
+    availableModels: ['gemini-2.5-flash', 'gemini-3.8-flash'],
     allowedOrigins: ['*'],
     maxInputChars: 20000,
     maxOutputTokens: 4096,
@@ -77,6 +78,22 @@ test('health endpoint responds without authentication', async () => {
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.ok, true);
+  });
+});
+
+test('model list is authenticated and returns configured models', async () => {
+  await withServer({}, async base => {
+    const unauthorized = await fetch(`${base}/api/models`);
+    assert.equal(unauthorized.status, 401);
+
+    const response = await fetch(`${base}/api/models`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.models, ['gemini-2.5-flash', 'gemini-3.8-flash']);
+    assert.equal(body.defaultModel, 'gemini-2.5-flash');
+    assert.equal(body.location, 'us-central1');
   });
 });
 
@@ -149,6 +166,10 @@ test('invalid JSON and missing prompt are rejected', async () => {
 
     const badSystem = await post(base, { prompt: 'x', systemInstruction: 42 });
     assert.equal(badSystem.response.status, 400);
+
+    const badModel = await post(base, { prompt: 'x', model: 'bad model/name' });
+    assert.equal(badModel.response.status, 400);
+    assert.equal(badModel.json.error, 'invalid_request');
   });
 });
 
@@ -211,6 +232,7 @@ test('successful requests clamp generation parameters and return metadata', asyn
   const captured = {};
   await withServer({ vertex: okVertex(captured) }, async base => {
     const result = await post(base, {
+      model: 'gemini-3.8-flash',
       systemInstruction: 'sys',
       prompt: 'target',
       temperature: 5,
@@ -219,11 +241,12 @@ test('successful requests clamp generation parameters and return metadata', asyn
     });
     assert.equal(result.response.status, 200);
     assert.equal(result.json.text, 'polished text');
-    assert.equal(result.json.model, 'gemini-2.5-flash');
+    assert.equal(result.json.model, 'gemini-3.8-flash');
     assert.equal(result.json.truncated, false);
     assert.equal(result.json.usage.totalTokenCount, 5);
     assert.equal(typeof result.json.requestId, 'string');
     assert.deepEqual(captured.generationConfig, { temperature: 2, topP: 0, maxOutputTokens: 4096 });
+    assert.equal(captured.model, 'gemini-3.8-flash');
     assert.equal(captured.systemInstruction, 'sys');
     assert.equal(captured.prompt, 'target');
   });

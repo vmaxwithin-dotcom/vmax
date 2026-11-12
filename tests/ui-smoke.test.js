@@ -234,6 +234,11 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(preset.value, 'P1');
   assert.equal(document.getElementById('stvp-target').textContent.includes('第 1 条'), true);
 
+  const model = document.getElementById('stvp-model');
+  assert.equal(model.options.length, 8);
+  model.value = 'gemini-3.8-flash';
+  model.dispatch('change');
+
   context.extensionSettings.st_vertex_polish.backendUrl = 'https://backend.test';
   sessionStorage.setItem('stvp.token.session', 'token-1234567890');
 
@@ -244,6 +249,7 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(fetchCalls[0].url, 'https://backend.test/api/polish');
   assert.equal(fetchCalls[0].init.headers.Authorization, 'Bearer token-1234567890');
   const body = JSON.parse(fetchCalls[0].init.body);
+  assert.equal(body.model, 'gemini-3.8-flash');
   assert.match(body.systemInstruction, /Write as Alice/);
   assert.match(body.prompt, /hello/);
 
