@@ -4,7 +4,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "st-vertex-polish contributors",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "auto_update": true,
   "minimum_client_version": "1.13.0"
 }

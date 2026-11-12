@@ -737,11 +737,21 @@ function onGenerationStarted() {
 }
 
 function openPanel() {
-  ui.panel.classList.remove('stvp-hidden');
-  ui.panel.classList.remove('stvp-minimized');
-  refreshTargetLabel();
-  if (ui.preset.options.length === 0) {
-    refreshPresets();
+  try {
+    if (!ui?.panel) throw new Error('窗口尚未初始化，请重新加载酒馆。');
+    ui.panel.classList.remove('stvp-hidden', 'stvp-minimized');
+    // Native dialog enters the browser top layer, above host drawers and menus.
+    if (typeof ui.panel.showModal === 'function' && !ui.panel.open) {
+      ui.panel.showModal();
+    } else if (typeof ui.panel.showModal !== 'function') {
+      ui.panel.setAttribute('open', '');
+    }
+    refreshTargetLabel();
+    if (ui.preset.options.length === 0) {
+      refreshPresets().catch(error => showError(error.message));
+    }
+  } catch (error) {
+    globalThis.alert?.(`Vertex 润色 0.3.1：无法打开窗口\n${error.message}`);
   }
 }
 
@@ -749,6 +759,8 @@ function closePanel() {
   if (state.busy) {
     invalidatePending('已取消');
   }
+  ui.panel.close?.();
+  ui.panel.removeAttribute?.('open');
   ui.panel.classList.add('stvp-hidden');
 }
 
@@ -760,7 +772,7 @@ function mountUi() {
   root.id = 'stvp-root';
   root.innerHTML = `
     <button id="stvp-fab" type="button" title="Vertex 润色">✦ 润色</button>
-    <section id="stvp-panel" class="stvp-hidden" aria-label="Vertex 润色">
+    <dialog id="stvp-panel" class="stvp-hidden" aria-label="Vertex 润色">
       <header class="stvp-header">
         <div class="stvp-heading">
           <span class="stvp-title">Vertex 润色</span>
@@ -837,7 +849,7 @@ function mountUi() {
           </div>
         </div>
       </div>
-    </section>
+    </dialog>
   `;
   document.body.append(root);
 
@@ -878,6 +890,10 @@ function mountUi() {
     ui.panel.classList.toggle('stvp-minimized');
   });
   $('stvp-close').addEventListener('click', closePanel);
+  ui.panel.addEventListener('cancel', event => {
+    event.preventDefault();
+    closePanel();
+  });
   ui.refresh.addEventListener('click', () => {
     refreshPresets();
   });

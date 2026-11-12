@@ -66,6 +66,9 @@ class FakeElement {
     this.title = '';
   }
 
+  showModal() { this.open = true; }
+  close() { this.open = false; }
+
   addEventListener(type, handler) {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, []);
@@ -230,6 +233,14 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(ready.length, 1);
   await ready[0]();
   await tick();
+
+  const panel = document.getElementById('stvp-panel');
+  document.getElementById('stvp-menu-entry').click();
+  assert.equal(panel.open, true);
+  document.getElementById('stvp-close').click();
+  assert.equal(panel.open, false);
+  document.getElementById('stvp-menu-entry').click();
+  assert.equal(panel.open, true);
 
   const preset = document.getElementById('stvp-preset');
   assert.equal(preset.options.length, 2);
