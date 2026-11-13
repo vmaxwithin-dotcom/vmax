@@ -18,20 +18,14 @@ const TOKEN_LOCAL_KEY = 'stvp.token.local';
 const MAX_INPUT_CHARS = 20000;
 const CLIENT_TIMEOUT_MS = 90000;
 
-const DEFAULT_MODELS = Object.freeze([
-  'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-2.5-flash',
-  'gemini-2.5-pro',
-]);
+import { DEFAULT_MODELS, buildModelList, validModelId, isLegacyGemini } from './src/models.js';
 
 const DEFAULT_SETTINGS = Object.freeze({
   backendUrl: '',
   presetName: '',
   model: '',
   customModel: '',
+  customModels: [],
   customPrompt: '',
   rememberToken: false,
   theme: 'auto',
@@ -45,6 +39,8 @@ const state = {
   pending: null,
   undo: null,
   presetCatalog: null,
+  remoteModels: [],
+  defaultModel: '',
 };
 
 let initialized = false;
@@ -356,18 +352,42 @@ function toggleTheme() {
 }
 
 function toggleCustomModel() {
-  if (!ui) {
-    return;
-  }
+  if (!ui) return;
   const isCustom = ui.model.value === '__custom__';
   ui.modelCustomWrap.classList.toggle('stvp-hidden', !isCustom);
+  const remove = $('stvp-model-remove');
+  if (remove) remove.disabled = !(getSettings().customModels || []).includes(ui.model.value);
+}
+
+function addCustomModel() {
+  const id = ui.modelCustom.value.trim();
+  if (!validModelId(id)) return showError('模型名只能包含字母、数字、点、下划线和短横线。');
+  if (isLegacyGemini(id)) return showError('按你的设置，已移除 Gemini 3.7 之前的模型，请填写 3.7 或更新的模型。');
+  const settings = getSettings();
+  settings.customModels = [...new Set([...(Array.isArray(settings.customModels) ? settings.customModels : []), id])];
+  settings.customModel = id;
+  settings.model = id;
+  populateModelSelect(state.remoteModels, state.defaultModel, id);
+  clearError();
+  setStatus(`已添加并选中 ${id}`, 'ok');
+}
+
+function removeCustomModel() {
+  const id = ui.model.value;
+  getSettings().customModels = (getSettings().customModels || []).filter(value => value !== id);
+  const remote = state.remoteModels.filter(value => value !== id);
+  populateModelSelect(remote, state.defaultModel, '__default__');
+  setStatus(`已取消收藏 ${id}；若后端目录仍提供它，再拉取时仍会出现。`, 'ok');
 }
 
 function populateModelSelect(models, defaultModel, saved) {
   const select = ui.model;
-  const list = Array.isArray(models) && models.length > 0 ? [...models] : [...DEFAULT_MODELS];
+  state.remoteModels = Array.isArray(models) ? models : [];
+  state.defaultModel = defaultModel || '';
+  const custom = Array.isArray(getSettings().customModels) ? getSettings().customModels : [];
+  const list = buildModelList(state.remoteModels, custom);
   const savedModel = saved === '__default__' ? '' : saved;
-  if (savedModel && savedModel !== '__custom__' && !list.includes(savedModel)) {
+  if (validModelId(savedModel) && !isLegacyGemini(savedModel) && !list.includes(savedModel)) {
     list.unshift(savedModel);
   }
 
@@ -901,13 +921,12 @@ function closePanel() {
 }
 
 function mountUi() {
-  if (document.getElementById('stvp-fab')) {
+  if (document.getElementById('stvp-root')) {
     return;
   }
   const root = document.createElement('div');
   root.id = 'stvp-root';
   root.innerHTML = `
-    <button id="stvp-fab" type="button" title="Vertex 润色">✦ 润色</button>
     <dialog id="stvp-panel" class="stvp-hidden" aria-label="Vertex 润色">
       <header class="stvp-header">
         <div class="stvp-heading">
@@ -957,16 +976,19 @@ function mountUi() {
           <button id="stvp-model-refresh" type="button" class="stvp-secondary">拉取</button>
         </div>
 
-        <label id="stvp-model-custom-wrap" class="stvp-field stvp-hidden">
-          <span>自定义模型名</span>
+        <div class="stvp-actions"><button id="stvp-model-remove" type="button" disabled>移除自定义收藏</button></div>
+        <div id="stvp-model-custom-wrap" class="stvp-field stvp-hidden">
+          <label for="stvp-model-custom">自定义模型名</label>
           <input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false">
-        </label>
+          <button id="stvp-model-add" type="button">添加并选中</button>
+        </div>
 
         <details id="stvp-entry-editor" class="stvp-entry-editor stvp-hidden">
           <summary><span>预设条目开关</span><span id="stvp-entry-count" class="stvp-entry-count"></span></summary>
           <div class="stvp-entry-toolbar">
             <span class="stvp-hint">只影响本扩展的润色请求，不会修改酒馆预设。</span>
-            <button id="stvp-entry-reset" type="button">恢复预设默认</button>
+            <button id="stvp-entry-all" type="button">全开</button><button id="stvp-entry-none" type="button">全关</button>
+            <button id="stvp-entry-reset" type="button">恢复默认</button>
           </div>
           <div id="stvp-entry-list" class="stvp-entry-list"></div>
         </details>
@@ -1028,13 +1050,6 @@ function mountUi() {
     undo: $('stvp-undo'),
   };
 
-  $('stvp-fab').addEventListener('click', () => {
-    if (ui.panel.classList.contains('stvp-hidden')) {
-      openPanel();
-    } else {
-      closePanel();
-    }
-  });
   $('stvp-theme').addEventListener('click', toggleTheme);
   $('stvp-min').addEventListener('click', () => {
     ui.panel.classList.toggle('stvp-minimized');
@@ -1105,6 +1120,25 @@ function mountUi() {
     toggleCustomModel();
     persistSettings();
   });
+  $('stvp-model-add').addEventListener('click', addCustomModel);
+  $('stvp-model-remove').addEventListener('click', removeCustomModel);
+  ui.modelCustom.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); addCustomModel(); }
+  });
+  for (const [id, enabled] of [['stvp-entry-all', true], ['stvp-entry-none', false]]) {
+    $(id).addEventListener('click', () => {
+      const name = ui.preset.value;
+      const preset = state.presetCatalog?.get(name);
+      if (!preset) return;
+      const context = getContextOrThrow();
+      const { entries } = getPresetEntries(preset, { characterId: context.characterId, isGroup: Boolean(context.groupId) });
+      const overrides = presetOverrides(name);
+      for (const entry of entries) if (!entry.marker && !entry.empty) overrides[entry.identifier] = enabled;
+      persistSettings();
+      renderPresetEntries();
+      setStatus(enabled ? '已启用所有文本条目' : '已停用所有文本条目', 'ok');
+    });
+  }
   ui.modelCustom.addEventListener('input', () => {
     getSettings().model = '__custom__';
     getSettings().customModel = ui.modelCustom.value;
@@ -1137,17 +1171,6 @@ function mountMenuEntry() {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel(); }
     });
     menu.append(entry);
-    if (ui) $('stvp-fab').classList.add('stvp-hidden');
-  }
-  // A settings launcher remains available even if an APK changes menu markup.
-  const settings = document.getElementById('extensions_settings2') || document.getElementById('extensions_settings');
-  if (settings && !document.getElementById('stvp-settings-entry')) {
-    const entry = document.createElement('button');
-    entry.id = 'stvp-settings-entry';
-    entry.className = 'menu_button';
-    entry.textContent = '✦ Vertex 润色 · 打开设置';
-    entry.addEventListener('click', () => { openPanel(); ui.settings.open = true; });
-    settings.append(entry);
   }
 }
 

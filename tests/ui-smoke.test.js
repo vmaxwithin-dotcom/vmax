@@ -262,7 +262,17 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.match(document.getElementById('stvp-entry-count').textContent, /启用/);
 
   const model = document.getElementById('stvp-model');
-  assert.equal(model.options.length, 8);
+  assert.equal(model.options.length, 4);
+  assert.equal(document.getElementById('stvp-fab'), null);
+  assert.equal(document.getElementById('stvp-settings-entry'), null);
+  model.value = '__custom__';
+  model.dispatch('change');
+  document.getElementById('stvp-model-custom').value = 'gemini-4-flash';
+  document.getElementById('stvp-model-add').click();
+  assert.equal(model.value, 'gemini-4-flash');
+  assert.ok(context.extensionSettings.st_vertex_polish.customModels.includes('gemini-4-flash'));
+  document.getElementById('stvp-model-remove').click();
+  assert.equal(context.extensionSettings.st_vertex_polish.customModels.includes('gemini-4-flash'), false);
   model.value = 'gemini-3.8-flash';
   model.dispatch('change');
 
