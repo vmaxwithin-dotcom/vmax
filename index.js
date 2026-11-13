@@ -8,6 +8,7 @@ import {
 } from './src/core.js';
 
 import { validateBackendUrl } from './src/connection.js';
+import { readPresetCatalog } from './src/presets.js';
 
 const MODULE_NAME = 'st_vertex_polish';
 let sessionToken = '';
@@ -93,8 +94,33 @@ function writeToken(value) {
     if (getSettings().rememberToken) localStorage.setItem(TOKEN_LOCAL_KEY, sessionToken);
     else localStorage.removeItem(TOKEN_LOCAL_KEY);
   } catch { /* Memory-only mode still works. */ }
-  if (ui) ui.token.value = '';
 }
+
+function setConnectionStatus(message) {
+  const status = $('stvp-connection-status');
+  if (status) status.textContent = message;
+}
+
+function saveConnectionCredentials() {
+  try {
+    const baseUrl = normalizeBaseUrl(ui.url.value);
+    if (!baseUrl) throw new Error('请先填写你的 Cloud Run 后端地址。');
+    const token = ui.token.value.trim() || readToken();
+    if (!token) throw new Error('请粘贴后端私人访问口令，不是 GitHub token 或 Google JSON。');
+    getSettings().backendUrl = baseUrl;
+    getSettings().rememberToken = ui.remember.checked;
+    ui.url.value = baseUrl;
+    writeToken(token);
+    persistSettings();
+    clearError();
+    setConnectionStatus('连接配置已保存；口令已暂存，尚未验证。请点击“验证连接”。');
+  } catch (error) {
+    setConnectionStatus(error.message);
+    showError(error.message);
+  }
+}
+
+let modelRequestController = null;
 
 function normalizeBaseUrl(value) {
   return validateBackendUrl(value);
@@ -187,63 +213,32 @@ function refreshTargetLabel() {
   ui.target.textContent = `第 ${target.index + 1} 条${name}${swipe}`;
 }
 
-async function loadSettingsObject() {
-  const context = getContextOrThrow();
-  if (context.chatCompletionSettings?.presets) {
-    return context.chatCompletionSettings;
-  }
-  try {
-    const response = await fetch('/api/settings/get', {
-      method: 'POST',
-      headers: context.getRequestHeaders?.() ?? { 'Content-Type': 'application/json' },
-    });
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    return data?.oai_settings ?? data?.settings?.oai_settings ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function refreshPresets() {
-  if (!ui) {
-    return;
-  }
-  const select = ui.preset;
-  const settingsObject = await loadSettingsObject();
-  const presets = settingsObject?.presets;
-  const names = presets && typeof presets === 'object'
-    ? Object.keys(presets).sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-    : [];
-
-  select.innerHTML = '';
-  select.add(new Option('不使用预设（仅自定义要求）', '__none__'));
-  for (const name of names) {
-    select.add(new Option(name, name));
-  }
-
-  const saved = getSettings().presetName;
-  const active = settingsObject?.preset_settings_openai;
-  let chosen = '__none__';
-  if (saved === '__none__') {
-    chosen = '__none__';
-  } else if (saved && names.includes(saved)) {
-    chosen = saved;
-  } else if (active && names.includes(active)) {
-    chosen = active;
-  } else if (names.length > 0) {
-    chosen = names[0];
-  }
-  select.value = chosen;
-  getSettings().presetName = chosen;
-  persistSettings();
-
-  if (!names.length) {
-    setStatus('未读取到酒馆预设', 'warn');
-  } else {
-    setStatus(`已读取 ${names.length} 个预设`, '');
+  if (!ui) return;
+  const button = ui.refresh;
+  button.disabled = true;
+  button.textContent = '读取中…';
+  setStatus('正在读取酒馆聊天补全预设…');
+  try {
+    const { catalog, active } = readPresetCatalog(getContextOrThrow());
+    const names = [...catalog.keys()].sort((a, b) => a.localeCompare(b));
+    const saved = getSettings().presetName;
+    ui.preset.innerHTML = '';
+    ui.preset.add(new Option('不使用预设（仅自定义要求）', '__none__'));
+    for (const name of names) ui.preset.add(new Option(name, name));
+    ui.preset.value = saved === '__none__' ? saved : names.includes(saved) ? saved : names.includes(active) ? active : names[0] || '__none__';
+    getSettings().presetName = ui.preset.value;
+    persistSettings();
+    setStatus(names.length ? `已读取 ${names.length} 个酒馆预设` : '没有保存的聊天补全预设，可先使用自定义要求', names.length ? 'ok' : 'warn');
+  } catch (error) {
+    if (!ui.preset.options.length) {
+      ui.preset.add(new Option('不使用预设（仅自定义要求）', '__none__'));
+      ui.preset.value = '__none__';
+    }
+    showError(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '刷新';
   }
 }
 
@@ -287,33 +282,60 @@ function populateModelSelect(models, defaultModel, saved) {
 }
 
 async function refreshModels({ silent = false } = {}) {
-  if (!ui) {
-    return;
-  }
-  const baseUrl = normalizeBaseUrl(ui.url.value || getSettings().backendUrl);
-  const token = ui.token.value || readToken();
-  if (!baseUrl || !token) {
+  if (!ui || modelRequestController) return;
+  // Initial load must not send a stored secret or open a confirmation prompt.
+  if (silent) {
     populateModelSelect(DEFAULT_MODELS, '', getSettings().model);
+    setConnectionStatus(readToken() ? '已有暂存口令，请点击“验证连接”。' : '请填写后端地址和私人访问口令，再保存并验证。');
     return;
   }
-
+  const controller = new AbortController();
+  modelRequestController = controller;
+  const check = $('stvp-check');
+  const save = $('stvp-save-connection');
+  const controls = [check, save, ui.modelRefresh, ui.url, ui.token, ui.remember];
+  controls.forEach(control => { if (control) control.disabled = true; });
+  if (check) check.textContent = '正在验证…';
+  ui.modelRefresh.textContent = '拉取中…';
+  clearError();
+  setConnectionStatus('正在验证连接并拉取模型列表…');
+  setStatus('正在连接后端…');
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   try {
-    const response = await privateFetch(baseUrl, '/api/models', token, { signal: AbortSignal.timeout(15000) });
+    const baseUrl = normalizeBaseUrl(ui.url.value);
+    const token = (ui.token.value.trim() || readToken()).trim();
+    if (!baseUrl) throw new Error('请先填写 Cloud Run 后端地址。');
+    if (!token) throw new Error('请先填写后端私人访问口令，再点击保存。');
+    const response = await privateFetch(baseUrl, '/api/models', token, { signal: controller.signal });
     const data = await readJson(response);
-    if (!response.ok) {
-      throw new Error(formatHttpError(response, data));
+    if (controller.signal.aborted) throw new Error('已取消连接验证。');
+    if (response.status === 401) {
+      throw new Error('认证失败（401）：请重新复制 Secret Manager 中 polish-access-token 的值，粘贴到口令框并保存。不要使用 GitHub token 或 Google JSON。');
     }
-    const models = Array.isArray(data?.models) ? data.models.filter(model => typeof model === 'string') : [];
-    populateModelSelect(models, typeof data?.defaultModel === 'string' ? data.defaultModel : '', getSettings().model);
-    $('stvp-connection-status').textContent = `连接成功 · ${data.location || 'Vertex'} · ${models.length} 个预置模型（非实时 Google 目录）`;
-    if (!silent) {
-      setStatus(`已拉取 ${models.length} 个模型`, 'ok');
-    }
+    if (!response.ok) throw new Error(formatHttpError(response, data));
+    if (!Array.isArray(data?.models)) throw new Error('后端返回的模型列表格式不正确，请确认后端已更新。');
+    const models = data.models.filter(model => typeof model === 'string');
+    populateModelSelect(models, typeof data.defaultModel === 'string' ? data.defaultModel : '', getSettings().model);
+    getSettings().backendUrl = baseUrl;
+    writeToken(token);
+    persistSettings();
+    setConnectionStatus(`连接成功 · ${data.location || 'Vertex'} · ${models.length} 个预置模型（非实时 Google 目录）`);
+    setStatus(`已拉取 ${models.length} 个模型`, 'ok');
   } catch (error) {
-    populateModelSelect(DEFAULT_MODELS, '', getSettings().model);
-    if (!silent) {
-      setStatus(`拉取模型失败：${error?.message || String(error)}`, 'warn');
-    }
+    const message = timedOut ? '连接超时（15 秒），请检查后端地址和网络后重试。'
+      : controller.signal.aborted ? '已取消连接验证。'
+      : error instanceof TypeError ? '连接失败：请检查后端地址、网络或后端来源设置。'
+      : error?.message || '连接失败，请稍后重试。';
+    // Do not echo raw fetch responses, request headers, or credential values.
+    setConnectionStatus(message);
+    showError(message);
+  } finally {
+    clearTimeout(timer);
+    modelRequestController = null;
+    controls.forEach(control => { if (control) control.disabled = false; });
+    if (check) check.textContent = '验证连接 / 拉取列表';
+    ui.modelRefresh.textContent = '拉取';
   }
 }
 
@@ -331,11 +353,8 @@ function selectedModel() {
 }
 
 async function getPresetByName(name) {
-  if (!name || name === '__none__') {
-    return null;
-  }
-  const settingsObject = await loadSettingsObject();
-  return settingsObject?.presets?.[name] ?? null;
+  if (!name || name === '__none__') return null;
+  return readPresetCatalog(getContextOrThrow()).catalog.get(name) || null;
 }
 
 async function buildRequest() {
@@ -457,7 +476,7 @@ async function runPolish() {
   const settings = getSettings();
   const rawUrl = ui.url.value.trim() || settings.backendUrl;
   const baseUrl = normalizeBaseUrl(rawUrl);
-  const token = ui.token.value || readToken();
+  const token = ui.token.value.trim() || readToken();
   settings.backendUrl = rawUrl;
   settings.customPrompt = ui.custom.value;
   persistSettings();
@@ -793,14 +812,14 @@ function mountUi() {
           <label class="stvp-field">
             <span>访问口令</span>
             <input id="stvp-token" type="password" placeholder="粘贴后端口令（不是 Google JSON）" autocomplete="off" spellcheck="false" autocapitalize="off">
-            <span class="stvp-hint">填写后输入框自动清空，口令默认仅留在本页内存中。</span>
+            <span class="stvp-hint">输入后点击“保存连接配置”；口令保持遮蔽，不会因失焦消失。默认仅本页暂存，刷新后重填。</span>
           </label>
           <label class="stvp-check">
             <input id="stvp-remember" type="checkbox">
             <span>在本设备记住口令</span>
           </label>
           <p class="stvp-hint">记住口令会明文写入本设备存储，不推荐在共享设备开启。Google JSON 只放后端，切勿粘贴到这里。</p>
-          <div class="stvp-actions"><button id="stvp-check" type="button">验证连接 / 拉取列表</button><button id="stvp-lock" type="button">清除口令</button></div>
+          <div class="stvp-actions"><button id="stvp-save-connection" type="button">保存连接配置</button><button id="stvp-check" type="button">验证连接 / 拉取列表</button><button id="stvp-lock" type="button">清除口令</button></div>
           <p id="stvp-connection-status" class="stvp-hint" role="status">尚未验证连接</p>
         </details>
 
@@ -901,20 +920,20 @@ function mountUi() {
     runPolish().catch(error => showError(error.message));
   });
   ui.apply.addEventListener('click', () => {
-    applyPolish();
+    applyPolish().catch(error => showError(`替换失败：${error.message}`));
   });
   ui.undo.addEventListener('click', () => {
-    undoPolish();
+    undoPolish().catch(error => showError(`撤销失败：${error.message}`));
   });
 
   ui.url.addEventListener('change', () => {
     getSettings().backendUrl = ui.url.value.trim();
     persistSettings();
   });
-  ui.token.addEventListener('change', () => {
-    writeToken(ui.token.value);
-    $('stvp-connection-status').textContent = readToken() ? '口令已暂存（未验证）' : '尚未填写口令';
+  ui.token.addEventListener('input', () => {
+    setConnectionStatus('口令已输入，点击“保存连接”或“验证连接”。');
   });
+  $('stvp-save-connection').addEventListener('click', saveConnectionCredentials);
   $('stvp-lock').addEventListener('click', () => {
     invalidatePending('已锁定连接');
     getSettings().rememberToken = false;

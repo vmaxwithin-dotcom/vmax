@@ -1,5 +1,9 @@
 # Vertex 润色 · SillyTavern 扩展
 
+## 0.3.2 重要更正（以本段和修复说明为准）
+
+旧版预设读取假设错误，已改为真实 `getPresetManager('openai').getPresetList()` 接口；不再使用 `chatCompletionSettings.presets` 或错误的 settings/get 回退。口令输入不再失焦清空，提供显式保存及验证反馈。46 项模拟测试通过，尚待真实酒馆/安卓验证。参见 [修复、参考源码与验证说明](docs/FIX-0.3.2.md)。以下旧版更新记录与接口描述仅供历史参考，不应视为当前实现。
+
 ## 0.3.0 更新说明（优先于下文旧版操作描述）
 
 - 入口加入魔杖按钮 `#extensionsMenuButton` 打开的 `#extensionsMenu`，不替换酒馆原有按钮；菜单存在时隐藏悬浮入口。扩展设置区也有“打开设置”入口，APK 改过菜单结构时保留悬浮兜底。

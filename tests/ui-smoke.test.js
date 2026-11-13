@@ -216,6 +216,14 @@ const context = {
   },
 };
 
+context.getPresetManager = api => {
+  assert.equal(api, 'openai');
+  return {
+    getPresetList: () => ({ presets: [context.chatCompletionSettings.presets.P1], preset_names: { P1: 0 }, settings: {} }),
+    getSelectedPresetName: () => 'P1',
+  };
+};
+
 globalThis.SillyTavern = {
   getContext: () => context,
 };
@@ -328,4 +336,27 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(localStorage.getItem('stvp.token.local'), null);
   assert.equal(sessionStorage.getItem('stvp.token.session'), null);
   assert.equal(document.getElementById('stvp-token').value, '');
+
+  // Real input flow: no automatic loss on blur; saving and verification use the exact value.
+  const tokenInput = document.getElementById('stvp-token');
+  document.getElementById('stvp-url').value = 'https://backend.test';
+  tokenInput.value = 'new-private-token-123456';
+  tokenInput.dispatch('input');
+  tokenInput.dispatch('change');
+  document.getElementById('stvp-save-connection').click();
+  assert.equal(tokenInput.value, 'new-private-token-123456');
+  fetchImpl = async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer new-private-token-123456');
+    return { ok: false, status: 401, text: async () => JSON.stringify({ error: 'unauthorized' }) };
+  };
+  document.getElementById('stvp-check').click();
+  assert.equal(document.getElementById('stvp-check').disabled, true);
+  await tick();
+  assert.match(document.getElementById('stvp-error').textContent, /401/);
+  assert.equal(document.getElementById('stvp-check').disabled, false);
+  fetchImpl = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ models: ['gemini-3.8-flash'], defaultModel: 'gemini-3.8-flash', location: 'global' }) });
+  document.getElementById('stvp-check').click();
+  await tick();
+  assert.match(document.getElementById('stvp-connection-status').textContent, /连接成功/);
+  assert.equal(document.getElementById('stvp-model').value, 'gemini-3.8-flash');
 });
