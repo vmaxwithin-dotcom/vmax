@@ -258,6 +258,10 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), true);
   document.getElementById('stvp-settings-toggle').click();
   assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), false);
+  document.getElementById('stvp-settings-toggle').click();
+  document.getElementById('stvp-logo').click();
+  assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), false);
+  assert.equal(document.getElementById('stvp-page-connection').classList.contains('stvp-hidden'), true);
 
   const panel = document.getElementById('stvp-panel');
   document.getElementById('stvp-menu-entry').click();

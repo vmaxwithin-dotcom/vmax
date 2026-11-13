@@ -47,8 +47,8 @@
   overflow: hidden;
   border: 1px solid var(--stvp-border);
   border-radius: 20px;
-  background: var(--stvp-bg);
-  color: var(--stvp-fg);
+  background: var(--stvp-bg) !important;
+  color: var(--stvp-fg) !important;
   box-shadow: 0 24px 70px rgba(0,0,0,.48);
 }
 #stvp-panel:not([open]) { display: none; }
@@ -66,17 +66,18 @@
 }
 #stvp-root .stvp-brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
 #stvp-root .stvp-logo {
-  width: 30px; height: 30px; border-radius: 9px;
-  display: grid; place-items: center;
+  width: 30px; height: 30px; min-height: 30px; padding: 0;
+  border-radius: 9px; display: grid; place-items: center;
   color: var(--stvp-accent); background: var(--stvp-accent-soft);
   border: 1px solid var(--stvp-border); font-size: 14px;
+  cursor: pointer;
 }
 #stvp-root .stvp-title {
   border: 0; background: transparent; color: var(--stvp-fg);
   font: inherit; font-size: 15px; font-weight: 650;
   min-height: 0; padding: 2px 0; cursor: pointer; white-space: nowrap;
 }
-#stvp-root .stvp-head-actions { display: flex; gap: 3px; flex: 0 0 auto; }
+#stvp-root .stvp-head-actions { display: flex; gap: 6px; flex: 0 0 auto; margin-left: 8px; }
 #stvp-root .stvp-head-actions button {
   width: 32px; height: 32px; min-height: 32px; padding: 0;
   display: grid; place-items: center;
@@ -113,7 +114,7 @@
 #stvp-root .stvp-card {
   border: 1px solid var(--stvp-border);
   border-radius: 14px;
-  background: var(--stvp-surface);
+  background: var(--stvp-surface) !important;
   padding: 13px;
   display: flex; flex-direction: column; gap: 10px;
 }
@@ -134,7 +135,10 @@
   width: 100%; box-sizing: border-box;
   padding: 9px 10px; min-height: 40px;
   border: 1px solid var(--stvp-border); border-radius: 9px;
-  background: var(--stvp-field); color: var(--stvp-fg);
+  background: var(--stvp-field) !important;
+  background-color: var(--stvp-field) !important;
+  color: var(--stvp-fg) !important;
+  -webkit-text-fill-color: var(--stvp-fg);
   font: inherit; font-size: 16px;
 }
 #stvp-root .stvp-field textarea { resize: vertical; min-height: 64px; line-height: 1.55; }
@@ -144,11 +148,24 @@
 #stvp-root .stvp-field textarea:focus { outline: none; border-color: var(--stvp-accent); box-shadow: 0 0 0 3px var(--stvp-accent-soft); }
 #stvp-root input::placeholder, #stvp-root textarea::placeholder { color: var(--stvp-muted); opacity: .75; }
 #stvp-root input[type="checkbox"] {
-  appearance: auto !important; -webkit-appearance: checkbox !important;
-  width: 17px !important; height: 17px !important; min-width: 17px !important; min-height: 17px !important;
-  max-width: 17px !important; max-height: 17px !important; padding: 0 !important; margin: 0 !important;
-  flex: 0 0 17px !important; border-radius: 3px !important; accent-color: var(--stvp-accent);
+  appearance: none !important; -webkit-appearance: none !important;
+  width: 18px !important; height: 18px !important; min-width: 18px !important; min-height: 18px !important;
+  max-width: 18px !important; max-height: 18px !important; padding: 0 !important; margin: 0 !important;
+  flex: 0 0 18px !important; border-radius: 4px !important;
+  border: 1.5px solid var(--stvp-border) !important;
+  background: var(--stvp-field) !important;
+  box-shadow: none !important; position: relative; cursor: pointer;
 }
+#stvp-root input[type="checkbox"]:checked {
+  background-color: var(--stvp-accent) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-size: 13px 13px;
+  background-position: center;
+  background-repeat: no-repeat;
+  border-color: var(--stvp-accent) !important;
+}
+#stvp-root input[type="checkbox"]:focus-visible { outline: 2px solid var(--stvp-accent); outline-offset: 2px; }
+#stvp-root input[type="checkbox"]:disabled { opacity: .45; cursor: not-allowed; }
 #stvp-root .stvp-check { display: flex; align-items: center; gap: 7px; color: var(--stvp-muted); font-size: 12.5px; }
 #stvp-root .stvp-row { display: flex; align-items: flex-end; gap: 8px; }
 #stvp-root .stvp-grow { flex: 1 1 auto; }

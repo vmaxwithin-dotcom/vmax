@@ -1011,7 +1011,7 @@ function mountUi() {
     <dialog id="stvp-panel" class="stvp-hidden" aria-label="润色助手">
       <header class="stvp-header">
         <div class="stvp-brand">
-          <span class="stvp-logo"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></span>
+          <button id="stvp-logo" type="button" class="stvp-logo" title="返回正文" aria-label="返回正文"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></button>
           <button id="stvp-home" type="button" class="stvp-title" title="返回正文">润色助手</button>
         </div>
         <div class="stvp-head-actions">
@@ -1150,6 +1150,7 @@ function mountUi() {
     populateModelSelect([], '', ''); persistSettings(); setStatus('接口格式已切换，请拉取模型', 'ok');
   });
   $('stvp-home').addEventListener('click', () => switchPage('text'));
+  $('stvp-logo').addEventListener('click', () => switchPage('text'));
   $('stvp-settings-toggle').addEventListener('click', () => {
     switchPage(state.page === 'text' ? 'connection' : 'text');
   });
