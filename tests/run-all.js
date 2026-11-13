@@ -2,6 +2,8 @@ import './core.test.js';
 import './connection.test.js';
 import './presets.test.js';
 import './models.test.js';
+import './prompt-presets.test.js';
+import '../backend/test/openai.test.js';
 import './diff.test.js';
 import '../backend/test/diagnostics.test.js';
 import './ui-smoke.test.js';

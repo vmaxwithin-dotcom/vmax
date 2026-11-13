@@ -38,8 +38,8 @@ function okVertex(captured = {}) {
   };
 }
 
-async function withServer({ config = baseConfig(), vertex = okVertex(), logger = silentLogger } = {}, fn) {
-  const app = createApp({ config, vertex, now: () => FIXED_NOW, logger });
+async function withServer({ config = baseConfig(), vertex = okVertex(), openai, logger = silentLogger } = {}, fn) {
+  const app = createApp({ config, vertex, openai, now: () => FIXED_NOW, logger });
   const server = http.createServer(app);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -71,6 +71,18 @@ async function post(base, body, { token = TOKEN, origin, rawBody, headers = {} }
   }
   return { response, json };
 }
+
+test('provider routing selects OpenAI and allows namespaced model IDs', async () => {
+  const captured = {};
+  const config = baseConfig({ openaiBaseUrl:'https://api.example.com/v1', openaiApiKey:'secret', openaiModels:['vendor/model'] });
+  await withServer({ config, openai:okVertex(captured), vertex:async()=>{ throw new Error('wrong adapter'); } }, async base => {
+    const response=await fetch(base+'/api/models?provider=openai',{headers:{Authorization:`Bearer ${TOKEN}`}});
+    assert.deepEqual((await response.json()).models,['vendor/model']);
+    const result=await post(base,{provider:'openai',model:'vendor/model',prompt:'x'});
+    assert.equal(result.response.status,200); assert.equal(captured.model,'vendor/model');
+    assert.equal((await post(base,{provider:'invalid',prompt:'x'})).response.status,400);
+  });
+});
 
 test('health endpoint responds without authentication', async () => {
   await withServer({}, async base => {

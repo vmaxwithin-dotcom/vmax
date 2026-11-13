@@ -9,7 +9,7 @@ import {
 } from './src/core.js';
 
 import { validateBackendUrl } from './src/connection.js';
-import { diffText } from './src/diff.js';
+import { normalizePromptPresets, savePromptPreset } from './src/prompt-presets.js';
 import { readPresetCatalog } from './src/presets.js';
 
 const MODULE_NAME = 'st_vertex_polish';
@@ -27,6 +27,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   model: '',
   customModel: '',
   customModels: [],
+  provider: 'vertex',
+  promptPresets: [],
+  activePromptId: '',
   customPrompt: '',
   rememberToken: false,
   theme: 'auto',
@@ -43,8 +46,6 @@ const state = {
   drafts: [],
   draftIndex: -1,
   originSnapshot: null,
-  lastPayload: null,
-  lastDiagnostic: null,
   remoteModels: [],
   defaultModel: '',
 };
@@ -370,7 +371,7 @@ function toggleCustomModel() {
 function addCustomModel() {
   const id = ui.modelCustom.value.trim();
   if (!validModelId(id)) return showError('模型名只能包含字母、数字、点、下划线和短横线。');
-  if (isLegacyGemini(id)) return showError('按你的设置，已移除 Gemini 3.7 之前的模型，请填写 3.7 或更新的模型。');
+  if (getSettings().provider !== 'openai' && isLegacyGemini(id)) return showError('按你的设置，已移除 Gemini 3.7 之前的模型，请填写 3.7 或更新的模型。');
   const settings = getSettings();
   settings.customModels = [...new Set([...(Array.isArray(settings.customModels) ? settings.customModels : []), id])];
   settings.customModel = id;
@@ -385,7 +386,7 @@ function removeCustomModel() {
   getSettings().customModels = (getSettings().customModels || []).filter(value => value !== id);
   const remote = state.remoteModels.filter(value => value !== id);
   populateModelSelect(remote, state.defaultModel, '__default__');
-  setStatus(`已取消收藏 ${id}；若后端目录仍提供它，再拉取时仍会出现。`, 'ok');
+  setStatus(`已取消保存的模型 ${id}；若后端目录仍提供它，再拉取时仍会出现。`, 'ok');
 }
 
 function populateModelSelect(models, defaultModel, saved) {
@@ -393,7 +394,9 @@ function populateModelSelect(models, defaultModel, saved) {
   state.remoteModels = Array.isArray(models) ? models : [];
   state.defaultModel = defaultModel || '';
   const custom = Array.isArray(getSettings().customModels) ? getSettings().customModels : [];
-  const list = buildModelList(state.remoteModels, custom);
+  const list = getSettings().provider === 'openai'
+    ? [...new Set([...state.remoteModels, ...custom].filter(validModelId))]
+    : buildModelList(state.remoteModels, custom);
   const savedModel = saved === '__default__' ? '' : saved;
   if (validModelId(savedModel) && !isLegacyGemini(savedModel) && !list.includes(savedModel)) {
     list.unshift(savedModel);
@@ -426,7 +429,7 @@ async function refreshModels({ silent = false } = {}) {
   if (!ui || modelRequestController) return;
   // Initial load must not send a stored secret or open a confirmation prompt.
   if (silent) {
-    populateModelSelect(DEFAULT_MODELS, '', getSettings().model);
+    populateModelSelect(getSettings().provider === 'openai' ? [] : DEFAULT_MODELS, '', getSettings().model);
     setConnectionStatus(readToken() ? '已有暂存口令，请点击“验证连接”。' : '请填写后端地址和私人访问口令，再保存并验证。');
     return;
   }
@@ -449,7 +452,7 @@ async function refreshModels({ silent = false } = {}) {
     if (!baseUrl) throw new Error('请先填写 Cloud Run 后端地址。');
     const tokenError = tokenShapeError(token);
     if (tokenError) throw new Error(tokenError);
-    const response = await privateFetch(baseUrl, '/api/models', token, { signal: controller.signal });
+    const response = await privateFetch(baseUrl, '/api/models?provider=' + encodeURIComponent(getSettings().provider), token, { signal: controller.signal });
     const data = await readJson(response);
     if (controller.signal.aborted) throw new Error('已取消连接验证。');
     if (response.status === 401) {
@@ -463,7 +466,7 @@ async function refreshModels({ silent = false } = {}) {
     getSettings().backendUrl = baseUrl;
     writeToken(token);
     persistSettings();
-    setConnectionStatus(`连接成功 · ${data.location || 'Vertex'} · ${models.length} 个预置模型（非实时 Google 目录）`);
+    setConnectionStatus(`连接成功 · ${models.length} 个模型`);
     setStatus(`已拉取 ${models.length} 个模型`, 'ok');
   } catch (error) {
     const message = timedOut ? '连接超时（15 秒），请检查后端地址和网络后重试。'
@@ -520,7 +523,7 @@ async function buildRequest(targetOverride = null) {
   if (ui.model.value === '__custom__' && !model) {
     throw new Error('请填写自定义模型名。');
   }
-  if (model && !/^[a-z0-9._-]{2,100}$/i.test(model)) {
+  if (model && !validModelId(model)) {
     throw new Error('模型名只能包含字母、数字、点、下划线和短横线。');
   }
 
@@ -579,15 +582,15 @@ function formatHttpError(response, data) {
     blocked: '内容被 Google 安全策略拦截',
     output_truncated: '模型输出被截断',
     timeout: '后端等待 Vertex 超时',
-    upstream_error: 'Vertex 返回错误',
+    upstream_error: '上游接口返回错误',
     backend_auth_failed: '后端无法获取 Google 访问令牌',
   };
   const base = map[data?.error] || `请求失败（HTTP ${response.status}）`;
   const detail = typeof data?.message === 'string' && data.message ? `：${data.message}` : '';
   const requestId = typeof data?.requestId === 'string' ? `（请求 ${data.requestId.slice(0, 8)}）` : '';
   const diagnostics = data?.diagnostics || {};
-  state.lastDiagnostic = { httpStatus: response.status, error: data?.error, requestId: data?.requestId, model: diagnostics.model, location: diagnostics.location, upstreamHttpStatus: diagnostics.upstreamHttpStatus, googleStatus: diagnostics.googleStatus };
-  const facts = [diagnostics.upstreamHttpStatus ? `Google HTTP ${diagnostics.upstreamHttpStatus}` : `HTTP ${response.status}`, diagnostics.googleStatus, diagnostics.model ? `模型 ${diagnostics.model}` : '', diagnostics.location ? `区域 ${diagnostics.location}` : '', diagnostics.action || ''].filter(Boolean);
+
+  const facts = [diagnostics.upstreamHttpStatus ? `上游 HTTP ${diagnostics.upstreamHttpStatus}` : `HTTP ${response.status}`, diagnostics.googleStatus, diagnostics.model ? `模型 ${diagnostics.model}` : '', diagnostics.location ? `区域 ${diagnostics.location}` : '', diagnostics.action || ''].filter(Boolean);
   return `${base}${detail}${requestId}\n${facts.join(' · ')}`;
 }
 
@@ -613,11 +616,37 @@ function invalidatePending(message) {
   setStatus(message, 'warn');
 }
 
+function refreshPromptSelectors() {
+  const settings = getSettings();
+  const list = normalizePromptPresets(settings);
+  for (const id of ['stvp-prompt-select', 'stvp-prompt-quick']) {
+    const select = $(id); select.innerHTML = '';
+    select.add(new Option('临时提示词', ''));
+    list.forEach(p => select.add(new Option(p.name, p.id)));
+    select.value = settings.activePromptId || '';
+  }
+}
+
+function choosePrompt(id) {
+  const settings = getSettings();
+  settings.activePromptId = id;
+  const preset = normalizePromptPresets(settings).find(p => p.id === id);
+  if (preset) {
+    settings.customPrompt = preset.text;
+    ui.custom.value = preset.text;
+    $('stvp-prompt-name').value = preset.name;
+  } else $('stvp-prompt-name').value = '';
+  refreshPromptSelectors();
+  persistSettings();
+  setStatus(preset ? `已选择：${preset.name}` : '使用临时提示词', 'ok');
+}
+
 function switchPage(page) {
+  $('stvp-settings-nav').classList.toggle('stvp-hidden', page === 'text');
   for (const name of ['connection', 'preset', 'prompt', 'text']) {
     $('stvp-page-' + name).classList.toggle('stvp-hidden', name !== page);
-    $('stvp-tab-' + name).classList.toggle('stvp-active', name === page);
-    $('stvp-tab-' + name).setAttribute?.('aria-selected', String(name === page));
+    if (name !== 'text') $('stvp-tab-' + name).classList.toggle('stvp-active', name === page);
+    if (name !== 'text') $('stvp-tab-' + name).setAttribute?.('aria-selected', String(name === page));
   }
 }
 
@@ -626,6 +655,7 @@ function renderDraft() {
   if (!draft) return;
   state.pending = { ...draft, snapshot: state.originSnapshot };
   ui.original.textContent = state.originSnapshot.text;
+  $('stvp-source').textContent = state.originSnapshot.text;
   ui.polished.textContent = draft.text;
   ui.result.classList.remove('stvp-hidden');
   ui.apply.disabled = !pendingStillValid(state.originSnapshot) || draft.truncated;
@@ -633,21 +663,6 @@ function renderDraft() {
   versions.innerHTML = '';
   state.drafts.forEach((item, index) => versions.add(new Option(`版本 ${index + 1}${item.truncated ? ' · 截断' : ''}`, String(index))));
   versions.value = String(state.draftIndex);
-  renderDiff();
-}
-
-function renderDiff() {
-  if (!state.pending) return;
-  const previous = $('stvp-compare').value === 'previous' && state.draftIndex > 0;
-  const base = previous ? state.drafts[state.draftIndex - 1].text : state.originSnapshot.text;
-  const container = $('stvp-diff');
-  container.replaceChildren?.();
-  for (const op of diffText(base, state.pending.text)) {
-    const span = document.createElement(op.type === 'remove' ? 'del' : op.type === 'add' ? 'ins' : 'span');
-    span.className = 'stvp-diff-' + op.type;
-    span.textContent = op.text;
-    container.append(span);
-  }
 }
 
 function loadSource() {
@@ -708,8 +723,7 @@ async function runPolish(refine = false) {
       built.composed.chars = built.composed.prompt.length + built.composed.systemInstruction.length;
       if (built.composed.error || built.composed.chars > MAX_INPUT_CHARS) throw new Error(built.composed.error || '继续修改请求超过 100,000 字符，请缩短要求或正文。');
     }
-    state.lastPayload = { model: built.model, systemInstruction: built.composed.systemInstruction, prompt: built.composed.prompt, ...built.sampling };
-    $('stvp-payload').textContent = JSON.stringify(state.lastPayload, null, 2);
+
   } catch (error) {
     state.busy = false;
     setBusy(false);
@@ -750,6 +764,7 @@ async function runPolish(refine = false) {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
+        provider: getSettings().provider,
         ...(built.model ? { model: built.model } : {}),
         systemInstruction: built.composed.systemInstruction,
         prompt: built.composed.prompt,
@@ -773,7 +788,7 @@ async function runPolish(refine = false) {
     if (!refine) { state.originSnapshot = snapshot; state.drafts = []; }
     const draft = { text: polished, model: typeof data?.model === 'string' ? data.model : '', truncated: Boolean(data?.truncated) };
     state.drafts.push(draft);
-    if (state.drafts.length > 10) state.drafts.shift();
+    if (state.drafts.length > 5) state.drafts.shift();
     state.draftIndex = state.drafts.length - 1;
     renderDraft();
     switchPage('text');
@@ -971,7 +986,7 @@ function openPanel() {
       refreshPresets().catch(error => showError(error.message));
     }
   } catch (error) {
-    globalThis.alert?.(`Vertex 润色 0.3.1：无法打开窗口\n${error.message}`);
+    globalThis.alert?.(`润色助手 0.3.1：无法打开窗口\n${error.message}`);
   }
 }
 
@@ -991,26 +1006,26 @@ function mountUi() {
   const root = document.createElement('div');
   root.id = 'stvp-root';
   root.innerHTML = `
-    <dialog id="stvp-panel" class="stvp-hidden" aria-label="Vertex 润色">
+    <dialog id="stvp-panel" class="stvp-hidden" aria-label="润色助手">
       <header class="stvp-header">
         <div class="stvp-heading">
-          <span class="stvp-title">Vertex 润色</span>
+          <button id="stvp-home" type="button" class="stvp-title" title="返回正文">润色助手</button>
           <span id="stvp-target" class="stvp-target">正在读取聊天…</span>
         </div>
         <div class="stvp-head-actions">
+          <button id="stvp-settings-toggle" type="button" title="打开设置" aria-label="打开设置">⚙</button>
           <button id="stvp-theme" type="button" title="切换日间/夜间" aria-label="切换日间/夜间">☾</button>
-          <button id="stvp-min" type="button" title="收起" aria-label="收起">—</button>
           <button id="stvp-close" type="button" title="关闭" aria-label="关闭">×</button>
         </div>
       </header>
-      <nav class="stvp-tabs" aria-label="工作台页面">
-        <button id="stvp-tab-connection" type="button">连接设置</button><button id="stvp-tab-preset" type="button">预设设置</button><button id="stvp-tab-prompt" type="button">提示词设置</button><button id="stvp-tab-text" type="button">正文设置</button>
+      <nav id="stvp-settings-nav" class="stvp-tabs stvp-hidden" aria-label="工作台页面">
+        <button id="stvp-tab-connection" type="button">连接设置</button><button id="stvp-tab-preset" type="button">预设设置</button><button id="stvp-tab-prompt" type="button">提示词设置</button>
       </nav>
       <div id="stvp-body" class="stvp-body">
         <section id="stvp-page-connection" class="stvp-page">
-        <p class="stvp-eyebrow">CONNECTION · 私人 Vertex 通道</p>
         <details id="stvp-settings" class="stvp-settings">
           <summary>连接设置</summary>
+          <label class="stvp-field"><span>接口格式</span><select id="stvp-provider"><option value="vertex">Vertex AI（JSON 密钥）</option><option value="openai">OpenAI 兼容</option></select></label>
           <label class="stvp-field">
             <span>后端地址</span>
             <input id="stvp-url" type="url" inputmode="url" placeholder="https://your-service.run.app" autocomplete="off" spellcheck="false">
@@ -1037,7 +1052,7 @@ function mountUi() {
           <button id="stvp-model-refresh" type="button" class="stvp-secondary">拉取</button>
         </div>
 
-        <div class="stvp-actions"><button id="stvp-model-remove" type="button" disabled>移除自定义收藏</button></div>
+        <div class="stvp-actions"><button id="stvp-model-remove" type="button" disabled>移除模型</button></div>
         <div id="stvp-model-custom-wrap" class="stvp-field stvp-hidden">
           <label for="stvp-model-custom">自定义模型名</label>
           <input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false">
@@ -1048,7 +1063,6 @@ function mountUi() {
         <p class="stvp-hint">验证连接不生成文字；润色与继续修改会计费。输出预算仍受后端和模型能力限制。</p>
         </section>
         <section id="stvp-page-preset" class="stvp-page stvp-hidden">
-        <p class="stvp-eyebrow">PRESET · 独立请求规则</p>
         <div class="stvp-row">
           <label class="stvp-field stvp-grow">
             <span>酒馆预设</span>
@@ -1069,20 +1083,20 @@ function mountUi() {
 
         </section>
         <section id="stvp-page-prompt" class="stvp-page stvp-hidden">
-        <p class="stvp-eyebrow">PROMPTS · 保留事实，调整表达</p>
+        <label class="stvp-field"><span>提示词预设</span><select id="stvp-prompt-select"></select></label>
+        <label class="stvp-field"><span>预设名称</span><input id="stvp-prompt-name" type="text" maxlength="80" placeholder="例如：细腻叙述"></label>
+        <div class="stvp-actions"><button id="stvp-prompt-new" type="button">新建</button><button id="stvp-prompt-save" type="button">保存</button><button id="stvp-prompt-delete" type="button">删除</button></div>
         <label class="stvp-field">
-          <span>自定义润色要求</span>
+          <span>润色提示词</span>
           <textarea id="stvp-custom" rows="3" maxlength="4000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea>
         </label>
 
         <label class="stvp-field"><span>本次补充要求（不持久保存）</span><textarea id="stvp-once" rows="3" placeholder="例如：这次不要缩短对白"></textarea></label>
-        <button id="stvp-inspect" type="button">组装并查看发送内容（不调用 AI）</button>
-        <details><summary>本次发送内容（不含凭据）</summary><pre id="stvp-payload" class="stvp-text"></pre></details>
         </section>
         <section id="stvp-page-text" class="stvp-page stvp-hidden">
-        <p class="stvp-eyebrow">MANUSCRIPT · 每次修改都可回看</p>
+        <div class="stvp-row"><label class="stvp-field stvp-grow"><span>润色提示词</span><select id="stvp-prompt-quick"></select></label><button id="stvp-edit-prompts" type="button">编辑</button></div>
         <div class="stvp-actions"><button id="stvp-load-source" type="button">读取最新回复</button><span id="stvp-source-count" class="stvp-hint"></span></div>
-        <details><summary>当前酒馆原文</summary><pre id="stvp-source" class="stvp-text"></pre></details>
+        <div class="stvp-label">原文</div><pre id="stvp-source" class="stvp-text"></pre>
         <div class="stvp-actions">
           <button id="stvp-run" type="button" class="stvp-primary">开始润色</button>
           <button id="stvp-cancel" type="button">取消请求</button>
@@ -1091,11 +1105,8 @@ function mountUi() {
 
 
         <div id="stvp-result" class="stvp-result stvp-hidden">
-          <div class="stvp-row"><label class="stvp-field stvp-grow"><span>草稿版本（最近 10 版）</span><select id="stvp-versions"></select></label><button id="stvp-copy-result" type="button">复制结果</button></div>
-          <label class="stvp-field"><span>比较基准</span><select id="stvp-compare"><option value="original">最初原文</option><option value="previous">上一版</option></select></label>
-          <div class="stvp-diff-legend"><span>黄色：新增</span><span>红色＋删除线：删除</span></div><div id="stvp-diff" class="stvp-text stvp-diff"></div>
-          <div class="stvp-label">原文</div>
-          <div id="stvp-original" class="stvp-text"></div>
+          <div class="stvp-row"><label class="stvp-field stvp-grow"><span>草稿版本（最近 5 版）</span><select id="stvp-versions"></select></label><button id="stvp-copy-result" type="button">复制结果</button></div>
+          <div id="stvp-original" class="stvp-hidden"></div>
           <div class="stvp-label">润色结果</div>
           <div id="stvp-polished" class="stvp-text" contenteditable="true" role="textbox" aria-label="可编辑润色结果"></div>
           <div class="stvp-actions">
@@ -1107,7 +1118,7 @@ function mountUi() {
         <button id="stvp-refine" type="button">继续修改（产生新版本）</button>
         </section>
       </div>
-      <footer class="stvp-footer"><span id="stvp-status" class="stvp-status" role="status">就绪</span><div id="stvp-meta" class="stvp-hint"></div><div id="stvp-error" class="stvp-error stvp-hidden" role="alert"></div><button id="stvp-copy-diagnostic" type="button">复制脱敏诊断</button></footer>
+      <footer class="stvp-footer"><span id="stvp-status" class="stvp-status" role="status">就绪</span><div id="stvp-meta" class="stvp-hint"></div><div id="stvp-error" class="stvp-error stvp-hidden" role="alert"></div></footer>
     </dialog>
   `;
   document.body.append(root);
@@ -1141,34 +1152,44 @@ function mountUi() {
     undo: $('stvp-undo'),
   };
 
-  for (const name of ['connection', 'preset', 'prompt', 'text']) $('stvp-tab-' + name).addEventListener('click', () => switchPage(name));
+  for (const name of ['connection', 'preset', 'prompt']) $('stvp-tab-' + name).addEventListener('click', () => switchPage(name));
+  for (const id of ['stvp-prompt-select', 'stvp-prompt-quick']) $(id).addEventListener('change', () => choosePrompt($(id).value));
+  $('stvp-edit-prompts').addEventListener('click', () => switchPage('prompt'));
+  $('stvp-prompt-new').addEventListener('click', () => {
+    getSettings().activePromptId = ''; getSettings().customPrompt = ''; ui.custom.value = ''; $('stvp-prompt-name').value = ''; refreshPromptSelectors(); persistSettings();
+  });
+  $('stvp-prompt-save').addEventListener('click', () => {
+    try { savePromptPreset(getSettings(), getSettings().activePromptId, $('stvp-prompt-name').value, ui.custom.value); refreshPromptSelectors(); persistSettings(); setStatus('提示词预设已保存', 'ok'); }
+    catch (error) { showError(error.message); }
+  });
+  $('stvp-prompt-delete').addEventListener('click', () => {
+    const settings = getSettings();
+    if (!settings.activePromptId) return showError('请先选择要删除的提示词预设。');
+    if (!globalThis.confirm('删除这个提示词预设？')) return;
+    settings.promptPresets = settings.promptPresets.filter(p => p.id !== settings.activePromptId);
+    settings.activePromptId = ''; settings.customPrompt = ''; ui.custom.value = ''; $('stvp-prompt-name').value = ''; refreshPromptSelectors(); persistSettings();
+  });
+  $('stvp-provider').addEventListener('change', () => {
+    getSettings().provider = $('stvp-provider').value;
+    state.remoteModels = []; state.defaultModel = ''; getSettings().model = '';
+    populateModelSelect([], '', ''); persistSettings(); setStatus('接口格式已切换，请拉取模型', 'ok');
+  });
+  $('stvp-home').addEventListener('click', () => switchPage('text'));
+  $('stvp-settings-toggle').addEventListener('click', () => switchPage('connection'));
   $('stvp-load-source').addEventListener('click', loadSource);
   $('stvp-refine').addEventListener('click', () => runPolish(true).catch(error => showError(error.message)));
   $('stvp-cancel').addEventListener('click', () => { state.controller?.abort(); setStatus('正在取消…', 'warn'); });
   $('stvp-versions').addEventListener('change', () => { state.draftIndex = Number($('stvp-versions').value); renderDraft(); });
-  $('stvp-compare').addEventListener('change', renderDiff);
   ui.polished.addEventListener('input', () => {
     if (!state.pending) return;
     state.pending.text = ui.polished.textContent;
     state.drafts[state.draftIndex].text = state.pending.text;
-    renderDiff();
-  });
-  $('stvp-copy-diagnostic').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(JSON.stringify(state.lastDiagnostic || { status: '没有服务器诊断记录' }, null, 2)); setStatus('已复制状态码、模型、区域与请求标识，不含正文和口令', 'ok'); }
-    catch { showError('剪贴板不可用，请复制界面错误提示；不要分享口令。'); }
-  });
+    });
   $('stvp-copy-result').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(state.pending?.text || ''); setStatus('结果已复制', 'ok'); }
     catch { showError('剪贴板不可用，请长按结果文字复制。'); }
   });
-  $('stvp-inspect').addEventListener('click', async () => {
-    try { const built = await buildRequest(); $('stvp-payload').textContent = JSON.stringify({ model: built.model, ...built.composed, ...built.sampling }, null, 2); setStatus('已组装，不调用 AI', 'ok'); }
-    catch (error) { showError(error.message); }
-  });
   $('stvp-theme').addEventListener('click', toggleTheme);
-  $('stvp-min').addEventListener('click', () => {
-    ui.panel.classList.toggle('stvp-minimized');
-  });
   $('stvp-close').addEventListener('click', closePanel);
   ui.panel.addEventListener('cancel', event => {
     event.preventDefault();
@@ -1280,7 +1301,7 @@ function mountMenuEntry() {
     entry.className = 'list-group-item flex-container flexGap5';
     entry.setAttribute?.('role', 'button');
     entry.setAttribute?.('tabindex', '0');
-    entry.innerHTML = '<span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span><span>Vertex 润色</span>';
+    entry.innerHTML = '<span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span><span>润色助手</span>';
     entry.addEventListener('click', openPanel);
     entry.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openPanel(); }
@@ -1305,6 +1326,9 @@ async function init() {
   ui.token.value = '';
   ui.remember.checked = Boolean(settings.rememberToken);
   ui.custom.value = settings.customPrompt;
+  $('stvp-provider').value = settings.provider || 'vertex';
+  refreshPromptSelectors();
+  $('stvp-prompt-name').value = settings.promptPresets.find(p => p.id === settings.activePromptId)?.name || '';
   applyTheme();
   switchPage('text');
   loadSource();

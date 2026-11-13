@@ -1,5 +1,11 @@
 /* Workbench: sticky navigation, comfortable reading, muted change highlights. */
-#stvp-root #stvp-panel { width: min(920px, calc(100vw - 24px)); max-height: 92vh; max-height: 92dvh; }
+#stvp-root #stvp-panel { width: min(760px, calc(100vw - 24px)); max-height: 90vh; max-height: 90dvh; }
+#stvp-root .stvp-header .stvp-title { background: transparent; color: var(--stvp-fg); border: 0; padding: 4px 0; font-size: 17px; font-weight: 650; cursor: pointer; }
+#stvp-root .stvp-head-actions button { width: 32px !important; height: 32px !important; font-size: 17px; }
+#stvp-root .stvp-body button { min-height: 36px !important; padding: 7px 11px; font-size: 13px; }
+#stvp-root #stvp-source { max-height: 28vh; margin: 0; }
+#stvp-root #stvp-page-text .stvp-row { align-items: end; }
+#stvp-root .stvp-tabs button { min-height: 38px; }
 #stvp-root .stvp-tabs { display: flex; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--stvp-border); overflow-x: auto; flex-shrink: 0; }
 #stvp-root .stvp-tabs button { flex: 1; white-space: nowrap; padding: 12px 14px; border: 0; border-radius: 10px; color: var(--stvp-muted); background: transparent; cursor: pointer; }
 #stvp-root .stvp-tabs button.stvp-active { color: var(--stvp-accent); background: rgba(117,155,224,.15); font-weight: 650; }

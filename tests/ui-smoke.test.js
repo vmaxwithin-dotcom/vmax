@@ -253,6 +253,18 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(panel.open, false);
   document.getElementById('stvp-menu-entry').click();
   assert.equal(panel.open, true);
+  assert.equal(document.getElementById('stvp-copy-diagnostic'), null);
+  assert.equal(document.getElementById('stvp-payload'), null);
+  assert.equal(document.getElementById('stvp-diff'), null);
+  document.getElementById('stvp-prompt-new').click();
+  document.getElementById('stvp-prompt-name').value = '测试文风';
+  document.getElementById('stvp-custom').value = '保留细节';
+  document.getElementById('stvp-prompt-save').click();
+  const selectedPrompt = context.extensionSettings.st_vertex_polish.activePromptId;
+  assert.ok(selectedPrompt);
+  assert.equal(document.getElementById('stvp-prompt-quick').value, selectedPrompt);
+  document.getElementById('stvp-home').click();
+  assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), false);
 
   const preset = document.getElementById('stvp-preset');
   assert.equal(preset.options.length, 2);
@@ -304,6 +316,8 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.match(JSON.parse(fetchCalls.at(-1).init.body).prompt, /polished/);
   assert.match(JSON.parse(fetchCalls.at(-1).init.body).systemInstruction, /更简洁/);
   assert.equal(document.getElementById('stvp-versions').options.length, 2);
+  for (let i = 0; i < 5; i++) { document.getElementById('stvp-refine').click(); await tick(); }
+  assert.equal(document.getElementById('stvp-versions').options.length, 5);
   document.getElementById('stvp-apply').click();
   await tick();
   assert.equal(context.chat[0].mes, 'polished');

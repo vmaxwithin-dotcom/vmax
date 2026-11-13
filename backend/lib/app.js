@@ -134,7 +134,7 @@ function vertexErrorResponse(error) {
   }
 }
 
-export function createApp({ config, vertex, now = Date.now, logger = console }) {
+export function createApp({ config, vertex, openai, now = Date.now, logger = console }) {
   if (typeof vertex !== 'function') {
     throw new Error('createApp requires a vertex function');
   }
@@ -201,10 +201,14 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
         log({ requestId, method: req.method, path, status: 405, ms: now() - startedAt, code: errorCode });
         return;
       }
+      const provider = new URL(req.url, 'http://localhost').searchParams.get('provider') || 'vertex';
+      if (!['vertex', 'openai'].includes(provider)) return sendJson(res, 400, { error:'invalid_request', message:'接口格式无效', requestId });
+      if (provider === 'openai' && (!config.openaiBaseUrl || !config.openaiApiKey)) return sendJson(res, 400, { error:'provider_not_configured', message:'请先在后端配置 OPENAI_BASE_URL、OPENAI_API_KEY 和 OPENAI_MODELS', requestId });
       sendJson(res, 200, {
-        models: config.availableModels,
-        defaultModel: config.model,
-        location: config.location,
+        provider,
+        models: provider === 'openai' ? config.openaiModels : config.availableModels,
+        defaultModel: provider === 'openai' ? config.openaiModels?.[0] || '' : config.model,
+        location: provider === 'openai' ? 'OpenAI-compatible' : config.location,
         requestId,
       });
       log({ requestId, method: req.method, path, status: 200, ms: now() - startedAt });
@@ -263,10 +267,13 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       return;
     }
 
+    const provider = body.provider || 'vertex';
+    if (!['vertex','openai'].includes(provider)) return sendJson(res, 400, { error:'invalid_request', message:'接口格式无效', requestId });
+    if (provider === 'openai' && (!openai || !config.openaiBaseUrl || !config.openaiApiKey)) return sendJson(res, 400, { error:'provider_not_configured', message:'OpenAI兼容接口尚未在后端配置', requestId });
     const requestedModel = typeof body.model === 'string' && body.model.trim()
       ? body.model.trim()
-      : config.model;
-    if (!/^[a-z0-9._-]{2,100}$/i.test(requestedModel)) {
+      : provider === 'openai' ? config.openaiModels?.[0] || '' : config.model;
+    if (!(provider === 'openai' ? /^[a-z0-9._:/-]{1,160}$/i : /^[a-z0-9._-]{2,100}$/i).test(requestedModel)) {
       errorCode = 'invalid_request';
       sendJson(res, 400, { error: errorCode, message: 'model 名称无效', requestId });
       log({ requestId, method: req.method, path, status: 400, ms: now() - startedAt, code: errorCode });
@@ -314,7 +321,8 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
     };
 
     try {
-      const result = await vertex({
+      res.diagnosticContext.location = provider === 'openai' ? 'OpenAI-compatible' : config.location;
+      const result = await (provider === 'openai' ? openai : vertex)({
         model: requestedModel,
         systemInstruction: typeof systemInstruction === 'string' ? systemInstruction.trim() : '',
         prompt,
@@ -343,6 +351,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
     } catch (error) {
       if (error instanceof VertexError) {
         const mapped = vertexErrorResponse(error);
+        if (provider === 'openai') mapped.body.message = ({ blocked:'上游内容过滤拦截', auth:'OpenAI兼容接口密钥未配置', timeout:'上游接口超时', empty:'上游未返回文字' })[error.kind] || `OpenAI兼容接口返回错误${error.status ? '（HTTP ' + error.status + '）' : ''}`;
         errorCode = mapped.body.error;
         const diagnostic = error.kind === 'upstream'
           ? upstreamDiagnostic(error.status, error.googleStatus)
@@ -358,9 +367,9 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
           ...mapped.body,
           requestId,
           diagnostics: {
-            source: error.kind === 'auth' ? 'google_auth' : 'vertex',
-            ...diagnostic,
-            action: diagnostic.action || actions[error.kind] || '使用请求标识检查配置。',
+            source: provider === 'openai' ? 'openai' : error.kind === 'auth' ? 'google_auth' : 'vertex',
+            ...(provider === 'openai' ? { upstreamHttpStatus:error.status || null, googleStatus:null } : diagnostic),
+            action: provider === 'openai' ? '检查后端配置的接口地址、密钥、模型名和供应商配额。' : diagnostic.action || actions[error.kind] || '使用请求标识检查配置。',
           },
         });
         log({

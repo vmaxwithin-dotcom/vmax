@@ -3,21 +3,22 @@ import { loadConfig } from './lib/config.js';
 import { createTokenProvider, loadServiceAccount } from './lib/google-auth.js';
 import { createVertexClient } from './lib/vertex.js';
 import { createApp } from './lib/app.js';
+import { createOpenAIClient } from './lib/openai.js';
 
 function main() {
   const config = loadConfig();
-  const serviceAccount = loadServiceAccount(config);
-
-  if (!config.project) {
-    config.project = serviceAccount.project_id || '';
-  }
-  if (!config.project) {
-    throw new Error('GOOGLE_CLOUD_PROJECT is required (the service account JSON has no project_id)');
-  }
-
-  const getAccessToken = createTokenProvider(serviceAccount);
-  const vertex = createVertexClient({ config, getAccessToken });
-  const app = createApp({ config, vertex });
+  let vertexClient;
+  const vertex = async request => {
+    if (!vertexClient) {
+      const account = loadServiceAccount(config);
+      config.project ||= account.project_id || '';
+      if (!config.project) throw new Error('Missing Google project');
+      vertexClient = createVertexClient({ config, getAccessToken:createTokenProvider(account) });
+    }
+    return vertexClient(request);
+  };
+  const openai = createOpenAIClient({ config });
+  const app = createApp({ config, vertex, openai });
 
   const server = http.createServer(app);
   server.requestTimeout = 300_000;
