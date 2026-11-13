@@ -33,7 +33,15 @@ class FakeClassList {
     }
   }
 
-  toggle(name) {
+  toggle(name, force) {
+    if (force === true) {
+      this.values.add(name);
+      return true;
+    }
+    if (force === false) {
+      this.values.delete(name);
+      return false;
+    }
     if (this.values.has(name)) {
       this.values.delete(name);
       return false;
@@ -245,6 +253,11 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(document.getElementById('stvp-root').dataset.theme, 'dark');
   document.getElementById('stvp-theme').click();
   assert.equal(document.getElementById('stvp-root').dataset.theme, 'light');
+  document.getElementById('stvp-settings-toggle').click();
+  assert.equal(document.getElementById('stvp-page-connection').classList.contains('stvp-hidden'), false);
+  assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), true);
+  document.getElementById('stvp-settings-toggle').click();
+  assert.equal(document.getElementById('stvp-page-text').classList.contains('stvp-hidden'), false);
 
   const panel = document.getElementById('stvp-panel');
   document.getElementById('stvp-menu-entry').click();
@@ -269,7 +282,7 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   const preset = document.getElementById('stvp-preset');
   assert.equal(preset.options.length, 2);
   assert.equal(preset.value, 'P1');
-  assert.equal(document.getElementById('stvp-target').textContent.includes('第 1 条'), true);
+  assert.match(document.getElementById('stvp-source-count').textContent, /字符/);
   assert.equal(document.getElementById('stvp-entry-editor').classList.contains('stvp-hidden'), false);
   assert.match(document.getElementById('stvp-entry-count').textContent, /启用/);
 

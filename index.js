@@ -43,6 +43,7 @@ const state = {
   pending: null,
   undo: null,
   presetCatalog: null,
+  page: 'text',
   drafts: [],
   draftIndex: -1,
   originSnapshot: null,
@@ -229,14 +230,14 @@ function refreshTargetLabel() {
   const context = getContextOrThrow();
   const target = pickTargetMessage(context.chat);
   if (!target) {
-    ui.target.textContent = '没有可润色的 AI 回复';
+    if ($('stvp-source-count')) $('stvp-source-count').textContent = '没有可润色的 AI 回复';
     ui.run.disabled = true;
     return;
   }
   ui.run.disabled = state.busy;
   const name = target.name ? ` · ${target.name}` : '';
   const swipe = target.swipeId !== null ? ` · 版本 ${target.swipeId + 1}/${target.swipeCount}` : '';
-  ui.target.textContent = `第 ${target.index + 1} 条${name}${swipe}`;
+  if ($('stvp-source-count')) $('stvp-source-count').textContent = `第 ${target.index + 1} 条${name}${swipe} · ${target.text.length.toLocaleString()} 字符`;
 }
 
 async function refreshPresets() {
@@ -347,7 +348,7 @@ function applyTheme() {
   root.dataset.theme = dark ? 'dark' : 'light';
   const button = $('stvp-theme');
   if (button) {
-    button.textContent = dark ? '☀' : '☾';
+    button.innerHTML = dark ? '<i class="fa-solid fa-sun" aria-hidden="true"></i>' : '<i class="fa-solid fa-moon" aria-hidden="true"></i>';
     button.title = dark ? '切换到日间' : '切换到夜间';
   }
 }
@@ -642,6 +643,7 @@ function choosePrompt(id) {
 }
 
 function switchPage(page) {
+  state.page = page;
   $('stvp-settings-nav').classList.toggle('stvp-hidden', page === 'text');
   for (const name of ['connection', 'preset', 'prompt', 'text']) {
     $('stvp-page-' + name).classList.toggle('stvp-hidden', name !== page);
@@ -658,6 +660,7 @@ function renderDraft() {
   $('stvp-source').textContent = state.originSnapshot.text;
   ui.polished.textContent = draft.text;
   ui.result.classList.remove('stvp-hidden');
+  $('stvp-refine-card').classList.remove('stvp-hidden');
   ui.apply.disabled = !pendingStillValid(state.originSnapshot) || draft.truncated;
   const versions = $('stvp-versions');
   versions.innerHTML = '';
@@ -689,13 +692,12 @@ async function runPolish(refine = false) {
   if (!baseUrl) {
     showError('请先在“连接设置”里填写后端地址。');
     switchPage('connection');
-    ui.settings.open = true;
     return;
   }
   const tokenError = tokenShapeError(token);
   if (tokenError) {
     showError(tokenError);
-    ui.settings.open = true;
+    switchPage('connection');
     return;
   }
 
@@ -1008,114 +1010,88 @@ function mountUi() {
   root.innerHTML = `
     <dialog id="stvp-panel" class="stvp-hidden" aria-label="润色助手">
       <header class="stvp-header">
-        <div class="stvp-heading">
+        <div class="stvp-brand">
+          <span class="stvp-logo"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i></span>
           <button id="stvp-home" type="button" class="stvp-title" title="返回正文">润色助手</button>
-          <span id="stvp-target" class="stvp-target">正在读取聊天…</span>
         </div>
         <div class="stvp-head-actions">
-          <button id="stvp-settings-toggle" type="button" title="打开设置" aria-label="打开设置">⚙</button>
-          <button id="stvp-theme" type="button" title="切换日间/夜间" aria-label="切换日间/夜间">☾</button>
-          <button id="stvp-close" type="button" title="关闭" aria-label="关闭">×</button>
+          <button id="stvp-settings-toggle" type="button" title="设置" aria-label="设置"><i class="fa-solid fa-gear" aria-hidden="true"></i></button>
+          <button id="stvp-theme" type="button" title="切换日间/夜间" aria-label="切换日间/夜间"><i class="fa-solid fa-moon" aria-hidden="true"></i></button>
+          <button id="stvp-close" type="button" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
         </div>
       </header>
-      <nav id="stvp-settings-nav" class="stvp-tabs stvp-hidden" aria-label="工作台页面">
-        <button id="stvp-tab-connection" type="button">连接设置</button><button id="stvp-tab-preset" type="button">预设设置</button><button id="stvp-tab-prompt" type="button">提示词设置</button>
+
+      <nav id="stvp-settings-nav" class="stvp-tabs stvp-hidden" aria-label="设置页面">
+        <button id="stvp-tab-connection" type="button"><i class="fa-solid fa-link" aria-hidden="true"></i><span>连接</span></button>
+        <button id="stvp-tab-preset" type="button"><i class="fa-solid fa-sliders" aria-hidden="true"></i><span>预设</span></button>
+        <button id="stvp-tab-prompt" type="button"><i class="fa-solid fa-pen-nib" aria-hidden="true"></i><span>提示词</span></button>
       </nav>
+
       <div id="stvp-body" class="stvp-body">
         <section id="stvp-page-connection" class="stvp-page">
-        <details id="stvp-settings" class="stvp-settings">
-          <summary>连接设置</summary>
-          <label class="stvp-field"><span>接口格式</span><select id="stvp-provider"><option value="vertex">Vertex AI（JSON 密钥）</option><option value="openai">OpenAI 兼容</option></select></label>
-          <label class="stvp-field">
-            <span>后端地址</span>
-            <input id="stvp-url" type="url" inputmode="url" placeholder="https://your-service.run.app" autocomplete="off" spellcheck="false">
-          </label>
-          <label class="stvp-field">
-            <span>访问口令</span>
-            <input id="stvp-token" type="password" placeholder="粘贴后端口令（不是 Google JSON）" autocomplete="off" spellcheck="false" autocapitalize="off">
-            <span class="stvp-hint">输入后点击“保存连接配置”；口令保持遮蔽，不会因失焦消失。默认仅本页暂存，刷新后重填。</span>
-          </label>
-          <label class="stvp-check">
-            <input id="stvp-remember" type="checkbox">
-            <span>在本设备记住口令</span>
-          </label>
-          <p class="stvp-hint">记住口令会明文写入本设备存储，不推荐在共享设备开启。Google JSON 只放后端，切勿粘贴到这里。</p>
-          <div class="stvp-actions"><button id="stvp-save-connection" type="button">保存连接配置</button><button id="stvp-check" type="button">验证连接 / 拉取列表</button><button id="stvp-lock" type="button">清除口令</button></div>
-          <p id="stvp-connection-status" class="stvp-hint" role="status">尚未验证连接</p>
-        </details>
-
-        <div class="stvp-row">
-          <label class="stvp-field stvp-grow">
-            <span>模型</span>
-            <select id="stvp-model"></select>
-          </label>
-          <button id="stvp-model-refresh" type="button" class="stvp-secondary">拉取</button>
-        </div>
-
-        <div class="stvp-actions"><button id="stvp-model-remove" type="button" disabled>移除模型</button></div>
-        <div id="stvp-model-custom-wrap" class="stvp-field stvp-hidden">
-          <label for="stvp-model-custom">自定义模型名</label>
-          <input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false">
-          <button id="stvp-model-add" type="button">添加并选中</button>
-        </div>
-
-        <label class="stvp-field"><span>输出预算（含模型思考）</span><input id="stvp-output-budget" type="number" min="256" max="32768" value="8192"></label>
-        <p class="stvp-hint">验证连接不生成文字；润色与继续修改会计费。输出预算仍受后端和模型能力限制。</p>
+          <div class="stvp-card">
+            <div class="stvp-card-head"><i class="fa-solid fa-plug" aria-hidden="true"></i><span>接口与连接</span></div>
+            <label class="stvp-field"><span>接口格式</span><select id="stvp-provider"><option value="vertex">Vertex AI（JSON 密钥）</option><option value="openai">OpenAI 兼容</option></select></label>
+            <label class="stvp-field"><span>后端地址</span><input id="stvp-url" type="url" inputmode="url" placeholder="https://your-service.run.app" autocomplete="off" spellcheck="false"></label>
+            <label class="stvp-field"><span>访问口令</span><input id="stvp-token" type="password" placeholder="粘贴后端口令" autocomplete="off" spellcheck="false" autocapitalize="off"><small>只是后端私人口令，不是 Google JSON 或 GitHub token。</small></label>
+            <label class="stvp-check"><input id="stvp-remember" type="checkbox"><span>在本设备记住口令</span></label>
+            <p class="stvp-hint">记住口令会明文保存在本设备；默认只留在当前页面内存，刷新后需重填。</p>
+            <div class="stvp-actions"><button id="stvp-save-connection" type="button" class="stvp-secondary">保存连接</button><button id="stvp-check" type="button" class="stvp-primary">验证连接</button><button id="stvp-lock" type="button" class="stvp-secondary">清除口令</button></div>
+            <p id="stvp-connection-status" class="stvp-status" role="status">尚未验证连接</p>
+          </div>
+          <div class="stvp-card">
+            <div class="stvp-card-head"><i class="fa-solid fa-microchip" aria-hidden="true"></i><span>模型</span></div>
+            <div class="stvp-row"><label class="stvp-field stvp-grow"><span>当前模型</span><select id="stvp-model"></select></label><button id="stvp-model-refresh" type="button" class="stvp-secondary">拉取</button></div>
+            <div class="stvp-actions"><button id="stvp-model-remove" type="button" class="stvp-secondary" disabled>移除保存的模型</button></div>
+            <div id="stvp-model-custom-wrap" class="stvp-field stvp-hidden"><label for="stvp-model-custom">自定义模型名</label><input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false"><button id="stvp-model-add" type="button" class="stvp-secondary">添加并选中</button></div>
+            <label class="stvp-field"><span>输出预算（token）</span><input id="stvp-output-budget" type="number" min="256" max="32768" value="8192"></label>
+            <p class="stvp-hint">验证连接不生成文字；输出预算受模型能力限制，模型思考也会消耗预算。</p>
+          </div>
         </section>
+
         <section id="stvp-page-preset" class="stvp-page stvp-hidden">
-        <div class="stvp-row">
-          <label class="stvp-field stvp-grow">
-            <span>酒馆预设</span>
-            <select id="stvp-preset"></select>
-          </label>
-          <button id="stvp-refresh" type="button" class="stvp-secondary">刷新</button>
-        </div>
-
-        <details id="stvp-entry-editor" class="stvp-entry-editor stvp-hidden">
-          <summary><span>预设条目开关</span><span id="stvp-entry-count" class="stvp-entry-count"></span></summary>
-          <div class="stvp-entry-toolbar">
-            <span class="stvp-hint">只影响本扩展的润色请求，不会修改酒馆预设。</span>
-            <button id="stvp-entry-all" type="button">全开</button><button id="stvp-entry-none" type="button">全关</button>
-            <button id="stvp-entry-reset" type="button">恢复默认</button>
+          <div class="stvp-card">
+            <div class="stvp-card-head"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>酒馆预设</span></div>
+            <div class="stvp-row"><label class="stvp-field stvp-grow"><span>使用的预设</span><select id="stvp-preset"></select></label><button id="stvp-refresh" type="button" class="stvp-secondary">刷新</button></div>
+            <p class="stvp-hint">只影响本助手的润色请求，不改酒馆当前预设。</p>
+            <details id="stvp-entry-editor" class="stvp-prompt-manage stvp-hidden"><summary><span>预设条目开关</span><span id="stvp-entry-count" class="stvp-entry-count"></span></summary><div class="stvp-entry-toolbar"><button id="stvp-entry-all" type="button" class="stvp-secondary">全开</button><button id="stvp-entry-none" type="button" class="stvp-secondary">全关</button><button id="stvp-entry-reset" type="button" class="stvp-secondary">恢复默认</button></div><div id="stvp-entry-list" class="stvp-entry-list"></div></details>
           </div>
-          <div id="stvp-entry-list" class="stvp-entry-list"></div>
-        </details>
-
         </section>
+
         <section id="stvp-page-prompt" class="stvp-page stvp-hidden">
-        <label class="stvp-field"><span>提示词预设</span><select id="stvp-prompt-select"></select></label>
-        <label class="stvp-field"><span>预设名称</span><input id="stvp-prompt-name" type="text" maxlength="80" placeholder="例如：细腻叙述"></label>
-        <div class="stvp-actions"><button id="stvp-prompt-new" type="button">新建</button><button id="stvp-prompt-save" type="button">保存</button><button id="stvp-prompt-delete" type="button">删除</button></div>
-        <label class="stvp-field">
-          <span>润色提示词</span>
-          <textarea id="stvp-custom" rows="3" maxlength="4000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea>
-        </label>
-
-        <label class="stvp-field"><span>本次补充要求（不持久保存）</span><textarea id="stvp-once" rows="3" placeholder="例如：这次不要缩短对白"></textarea></label>
-        </section>
-        <section id="stvp-page-text" class="stvp-page stvp-hidden">
-        <div class="stvp-row"><label class="stvp-field stvp-grow"><span>润色提示词</span><select id="stvp-prompt-quick"></select></label><button id="stvp-edit-prompts" type="button">编辑</button></div>
-        <div class="stvp-actions"><button id="stvp-load-source" type="button">读取最新回复</button><span id="stvp-source-count" class="stvp-hint"></span></div>
-        <div class="stvp-label">原文</div><pre id="stvp-source" class="stvp-text"></pre>
-        <div class="stvp-actions">
-          <button id="stvp-run" type="button" class="stvp-primary">开始润色</button>
-          <button id="stvp-cancel" type="button">取消请求</button>
-        </div>
-
-
-
-        <div id="stvp-result" class="stvp-result stvp-hidden">
-          <div class="stvp-row"><label class="stvp-field stvp-grow"><span>草稿版本（最近 5 版）</span><select id="stvp-versions"></select></label><button id="stvp-copy-result" type="button">复制结果</button></div>
-          <div id="stvp-original" class="stvp-hidden"></div>
-          <div class="stvp-label">润色结果</div>
-          <div id="stvp-polished" class="stvp-text" contenteditable="true" role="textbox" aria-label="可编辑润色结果"></div>
-          <div class="stvp-actions">
-            <button id="stvp-apply" type="button" class="stvp-primary" disabled>替换当前回复</button>
-            <button id="stvp-undo" type="button" class="stvp-secondary" disabled>撤销上次替换</button>
+          <div class="stvp-card">
+            <div class="stvp-card-head"><i class="fa-solid fa-pen-nib" aria-hidden="true"></i><span>润色提示词</span></div>
+            <details id="stvp-prompt-manage" class="stvp-prompt-manage">
+              <summary>管理提示词预设</summary>
+              <label class="stvp-field"><span>提示词预设</span><select id="stvp-prompt-select"></select></label>
+              <label class="stvp-field"><span>预设名称</span><input id="stvp-prompt-name" type="text" maxlength="80" placeholder="例如：细腻叙述"></label>
+              <div class="stvp-actions"><button id="stvp-prompt-new" type="button" class="stvp-secondary">新建</button><button id="stvp-prompt-save" type="button" class="stvp-primary">保存</button><button id="stvp-prompt-delete" type="button" class="stvp-secondary">删除</button></div>
+            </details>
+            <label class="stvp-field"><span>提示词正文</span><textarea id="stvp-custom" rows="10" maxlength="12000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea></label>
+            <label class="stvp-field"><span>本次补充要求（不保存）</span><textarea id="stvp-once" rows="2" placeholder="例如：这次不要缩短对白"></textarea></label>
           </div>
-        </div>
-        <label class="stvp-field"><span>继续修改要求</span><textarea id="stvp-followup" rows="2" placeholder="保留这一版，把第二段改得更自然…"></textarea></label>
-        <button id="stvp-refine" type="button">继续修改（产生新版本）</button>
+        </section>
+
+        <section id="stvp-page-text" class="stvp-page">
+          <div class="stvp-card stvp-toolbar-card">
+            <div class="stvp-row"><label class="stvp-field stvp-grow"><span>润色提示词</span><select id="stvp-prompt-quick"></select></label><button id="stvp-edit-prompts" type="button" class="stvp-secondary"><i class="fa-solid fa-pen" aria-hidden="true"></i> 编辑</button></div>
+            <div class="stvp-row"><button id="stvp-load-source" type="button" class="stvp-secondary"><i class="fa-solid fa-rotate" aria-hidden="true"></i> 读取最新回复</button><span id="stvp-source-count" class="stvp-muted"></span></div>
+          </div>
+          <div class="stvp-card">
+            <div class="stvp-card-head"><span>原文</span></div>
+            <pre id="stvp-source" class="stvp-text"></pre>
+          </div>
+          <div class="stvp-actionbar"><button id="stvp-run" type="button" class="stvp-primary"><i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i> 开始润色</button><button id="stvp-cancel" type="button" class="stvp-secondary">取消</button></div>
+          <div id="stvp-result" class="stvp-card stvp-result stvp-hidden">
+            <div class="stvp-card-head"><span>润色结果</span><div class="stvp-result-tools"><select id="stvp-versions" aria-label="草稿版本"></select><button id="stvp-copy-result" type="button" class="stvp-secondary">复制</button></div></div>
+            <div id="stvp-original" class="stvp-hidden"></div>
+            <div id="stvp-polished" class="stvp-text stvp-editable" contenteditable="true" role="textbox" aria-label="可编辑润色结果"></div>
+            <div class="stvp-actions"><button id="stvp-apply" type="button" class="stvp-primary" disabled>替换当前回复</button><button id="stvp-undo" type="button" class="stvp-secondary" disabled>撤销上次替换</button></div>
+          </div>
+          <div id="stvp-refine-card" class="stvp-card stvp-hidden">
+            <label class="stvp-field"><span>继续修改要求</span><textarea id="stvp-followup" rows="2" placeholder="保留这一版，把第二段改得更自然…"></textarea></label>
+            <button id="stvp-refine" type="button" class="stvp-secondary"><i class="fa-solid fa-wand-sparkles" aria-hidden="true"></i> 继续修改</button>
+          </div>
         </section>
       </div>
       <footer class="stvp-footer"><span id="stvp-status" class="stvp-status" role="status">就绪</span><div id="stvp-meta" class="stvp-hint"></div><div id="stvp-error" class="stvp-error stvp-hidden" role="alert"></div></footer>
@@ -1126,9 +1102,8 @@ function mountUi() {
   ui = {
     panel: $('stvp-panel'),
     body: $('stvp-body'),
-    target: $('stvp-target'),
-    settings: $('stvp-settings'),
-    url: $('stvp-url'),
+
+      url: $('stvp-url'),
     token: $('stvp-token'),
     remember: $('stvp-remember'),
     preset: $('stvp-preset'),
@@ -1175,7 +1150,9 @@ function mountUi() {
     populateModelSelect([], '', ''); persistSettings(); setStatus('接口格式已切换，请拉取模型', 'ok');
   });
   $('stvp-home').addEventListener('click', () => switchPage('text'));
-  $('stvp-settings-toggle').addEventListener('click', () => switchPage('connection'));
+  $('stvp-settings-toggle').addEventListener('click', () => {
+    switchPage(state.page === 'text' ? 'connection' : 'text');
+  });
   $('stvp-load-source').addEventListener('click', loadSource);
   $('stvp-refine').addEventListener('click', () => runPolish(true).catch(error => showError(error.message)));
   $('stvp-cancel').addEventListener('click', () => { state.controller?.abort(); setStatus('正在取消…', 'warn'); });
