@@ -13,9 +13,12 @@ test('loadConfig applies defaults and parses origins', () => {
   assert.deepEqual(config.allowedOrigins, ['*']);
   assert.equal(config.dailyLimit, 100);
   assert.equal(config.minIntervalMs, 3000);
-  assert.equal(config.maxInputChars, 20000);
-  assert.equal(config.maxOutputTokens, 8192);
-  assert.equal(config.requestTimeoutMs, 60000);
+  assert.equal(config.maxInputChars, 100000);
+  assert.equal(config.maxOutputTokens, 32768);
+  assert.equal(config.requestTimeoutMs, 180000);
+  assert.equal(config.maxBodyBytes, 1048576);
+  assert.equal(loadConfig({ POLISH_ACCESS_TOKEN: TOKEN, MAX_OUTPUT_TOKENS: '32768' }).maxOutputTokens, 32768);
+  assert.throws(() => loadConfig({ POLISH_ACCESS_TOKEN: TOKEN, MAX_OUTPUT_TOKENS: '32769' }), /MAX_OUTPUT_TOKENS/);
   assert.equal(config.apiVersion, 'v1');
 
   const origins = loadConfig({

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { RequestLimiter } from './limits.js';
 import { VertexError } from './vertex.js';
+import { upstreamDiagnostic } from './diagnostics.js';
 
 function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest();
@@ -13,6 +14,24 @@ function safeEqual(left, right) {
 function sendJson(res, status, body, extraHeaders = {}) {
   if (res.writableEnded || res.destroyed) {
     return;
+  }
+  if (body?.error) {
+    const context = res.diagnosticContext || {};
+    body = {
+      ...body,
+      model: context.model,
+      location: context.location,
+      diagnostics: {
+        source: 'backend',
+        httpStatus: status,
+        upstreamHttpStatus: null,
+        googleStatus: null,
+        model: context.model,
+        location: context.location,
+        requestId: body.requestId,
+        ...body.diagnostics,
+      },
+    };
   }
   const payload = JSON.stringify(body);
   res.statusCode = status;
@@ -108,7 +127,10 @@ function vertexErrorResponse(error) {
     case 'auth':
       return { status: 500, body: { error: 'backend_auth_failed', message: '后端无法获取 Google 访问令牌' } };
     default:
-      return { status: 502, body: { error: 'upstream_error', message: 'Vertex 返回错误' } };
+      if (error.kind === 'empty') {
+        return { status: 502, body: { error: 'empty_output', message: '模型未返回可替换的正文' } };
+      }
+      return { status: 502, body: { error: 'upstream_error', message: upstreamDiagnostic(error.status, error.googleStatus).summary } };
   }
 }
 
@@ -136,6 +158,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       }
     })();
     let errorCode = '';
+    res.diagnosticContext = { model: config.model, location: config.location };
 
     res.setHeader('X-Request-Id', requestId);
     res.setHeader('Cache-Control', 'no-store');
@@ -250,6 +273,7 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       return;
     }
 
+    res.diagnosticContext.model = requestedModel;
     const totalChars = prompt.length + (typeof systemInstruction === 'string' ? systemInstruction.length : 0);
     if (totalChars > config.maxInputChars) {
       errorCode = 'too_large';
@@ -320,7 +344,25 @@ export function createApp({ config, vertex, now = Date.now, logger = console }) 
       if (error instanceof VertexError) {
         const mapped = vertexErrorResponse(error);
         errorCode = mapped.body.error;
-        sendJson(res, mapped.status, { ...mapped.body, requestId });
+        const diagnostic = error.kind === 'upstream'
+          ? upstreamDiagnostic(error.status, error.googleStatus)
+          : { upstreamHttpStatus: null, googleStatus: null };
+        const actions = {
+          blocked: '本次任务已结束；不要反复提交被拦截内容。',
+          truncated: '提高输出预算或缩短正文；预算包括模型可能使用的思考 token。',
+          timeout: '缩短输入或稍后手动重试；上游可能仍完成并计费。',
+          auth: '核对服务账号 JSON、密钥有效性和 OAuth 配置。',
+          empty: '检查输出预算和模型兼容性。',
+        };
+        sendJson(res, mapped.status, {
+          ...mapped.body,
+          requestId,
+          diagnostics: {
+            source: error.kind === 'auth' ? 'google_auth' : 'vertex',
+            ...diagnostic,
+            action: diagnostic.action || actions[error.kind] || '使用请求标识检查配置。',
+          },
+        });
         log({
           requestId,
           method: req.method,

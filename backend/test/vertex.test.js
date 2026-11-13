@@ -102,6 +102,23 @@ test('createVertexClient maps upstream HTTP errors', async () => {
   );
 });
 
+test('createVertexClient preserves only whitelisted Google status, never raw upstream text', async () => {
+  for (const status of ['INVALID_ARGUMENT', 'SECRET_PROMPT_OR_TOKEN']) {
+    const client = createVertexClient({
+      config: { project: 'demo', location: 'global', model: 'gemini-3.8-flash', requestTimeoutMs: 1000 },
+      getAccessToken: async () => 'secret-token',
+      fetchImpl: async () => new Response(JSON.stringify({ error: { status, message: 'SECRET_CHAT_TEXT', details: [{ private_key: 'SECRET_KEY' }] } }), { status: 400 }),
+    });
+    await assert.rejects(() => client({ prompt: 'x', generationConfig: {} }), error => {
+      assert.equal(error.status, 400);
+      assert.equal(error.googleStatus, 'INVALID_ARGUMENT');
+      assert.equal(error.detail, undefined);
+      assert.doesNotMatch(JSON.stringify(error), /SECRET/);
+      return true;
+    });
+  }
+});
+
 test('createVertexClient maps timeouts', async () => {
   const client = createVertexClient({
     config: { project: 'demo', location: 'us-central1', model: 'gemini-2.5-flash', requestTimeoutMs: 20 },

@@ -296,6 +296,40 @@ test('unexpected errors become a generic 500', async () => {
   });
 });
 
+test('upstream errors include safe structured diagnostics without echoing raw errors', async () => {
+  const lines = [];
+  const vertex = async () => { throw new VertexError('upstream', 'SECRET_CHAT_TEXT', { status: 404, googleStatus: 'NOT_FOUND', detail: TOKEN }); };
+  await withServer({ vertex, logger: { info: line => lines.push(line) } }, async base => {
+    const result = await post(base, { model: 'gemini-3.8-flash', prompt: 'SECRET_CHAT_TEXT' });
+    assert.equal(result.response.status, 502);
+    assert.equal(result.json.model, 'gemini-3.8-flash');
+    assert.equal(result.json.location, 'us-central1');
+    assert.equal(result.json.diagnostics.source, 'vertex');
+    assert.equal(result.json.diagnostics.upstreamHttpStatus, 404);
+    assert.equal(result.json.diagnostics.googleStatus, 'NOT_FOUND');
+    assert.equal(result.json.diagnostics.requestId, result.json.requestId);
+    assert.match(result.json.diagnostics.action, /模型名称/);
+    assert.doesNotMatch(JSON.stringify(result.json), /SECRET_CHAT_TEXT/);
+  });
+  assert.doesNotMatch(lines.join(''), /SECRET_CHAT_TEXT/);
+  assert.ok(!lines.join('').includes(TOKEN));
+});
+
+test('long text cap allows 100000 combined characters and rejects one extra', async () => {
+  const captured = {};
+  const config = baseConfig({ maxInputChars: 100000, maxBodyBytes: 1048576, maxOutputTokens: 32768 });
+  await withServer({ config, vertex: okVertex(captured) }, async base => {
+    const accepted = await post(base, { systemInstruction: 's'.repeat(1000), prompt: '文'.repeat(99000), maxOutputTokens: 32768 });
+    assert.equal(accepted.response.status, 200);
+    assert.equal(captured.generationConfig.maxOutputTokens, 32768);
+    const rejected = await post(base, { systemInstruction: 's'.repeat(1000), prompt: '文'.repeat(99001) });
+    assert.equal(rejected.response.status, 413);
+    assert.equal(rejected.json.diagnostics.source, 'backend');
+    assert.equal(rejected.json.diagnostics.upstreamHttpStatus, null);
+    assert.equal(rejected.json.diagnostics.requestId, rejected.json.requestId);
+  });
+});
+
 test('non-POST methods on the polish route are rejected', async () => {
   await withServer({}, async base => {
     const response = await fetch(`${base}/api/polish`, {

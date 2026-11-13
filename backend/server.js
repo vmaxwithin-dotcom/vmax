@@ -20,7 +20,7 @@ function main() {
   const app = createApp({ config, vertex });
 
   const server = http.createServer(app);
-  server.requestTimeout = 90_000;
+  server.requestTimeout = 300_000;
   server.headersTimeout = 15_000;
 
   server.listen(config.port, '0.0.0.0', () => {
@@ -46,6 +46,7 @@ function main() {
 try {
   main();
 } catch (error) {
-  console.error(JSON.stringify({ level: 'error', message: error?.message || String(error) }));
+  // Never log raw startup exceptions: credential parsers may include secrets.
+  console.error(JSON.stringify({ level: 'error', code: 'startup_failed', message: 'Backend configuration or service-account initialization failed; check environment and mounted secret.' }));
   process.exit(1);
 }

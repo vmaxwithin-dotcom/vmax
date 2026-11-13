@@ -298,6 +298,12 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(document.getElementById('stvp-polished').textContent, 'polished');
   assert.equal(document.getElementById('stvp-apply').disabled, false);
 
+  document.getElementById('stvp-followup').value = '更简洁';
+  document.getElementById('stvp-refine').click();
+  await tick();
+  assert.match(JSON.parse(fetchCalls.at(-1).init.body).prompt, /polished/);
+  assert.match(JSON.parse(fetchCalls.at(-1).init.body).systemInstruction, /更简洁/);
+  assert.equal(document.getElementById('stvp-versions').options.length, 2);
   document.getElementById('stvp-apply').click();
   await tick();
   assert.equal(context.chat[0].mes, 'polished');

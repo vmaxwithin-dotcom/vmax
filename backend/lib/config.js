@@ -11,12 +11,12 @@ const DEFAULTS = Object.freeze({
     'gemini-2.5-flash',
     'gemini-2.5-pro',
   ],
-  maxInputChars: 20000,
-  maxOutputTokens: 8192,
+  maxInputChars: 100000,
+  maxOutputTokens: 32768,
   dailyLimit: 100,
   minIntervalMs: 3000,
-  requestTimeoutMs: 60000,
-  maxBodyBytes: 262144,
+  requestTimeoutMs: 180000,
+  maxBodyBytes: 1048576,
 });
 
 function readInt(env, name, fallback, min, max) {
@@ -88,7 +88,7 @@ export function loadConfig(env = process.env) {
     apiVersion,
     allowedOrigins: allowedOrigins.length > 0 ? allowedOrigins : ['*'],
     maxInputChars: readInt(env, 'MAX_INPUT_CHARS', DEFAULTS.maxInputChars, 100, 100000),
-    maxOutputTokens: readInt(env, 'MAX_OUTPUT_TOKENS', DEFAULTS.maxOutputTokens, 64, 8192),
+    maxOutputTokens: readInt(env, 'MAX_OUTPUT_TOKENS', DEFAULTS.maxOutputTokens, 64, 32768),
     dailyLimit: readInt(env, 'DAILY_LIMIT', DEFAULTS.dailyLimit, 1, 10000),
     minIntervalMs: readInt(env, 'MIN_INTERVAL_MS', DEFAULTS.minIntervalMs, 0, 60000),
     requestTimeoutMs: readInt(env, 'REQUEST_TIMEOUT_MS', DEFAULTS.requestTimeoutMs, 1000, 300000),

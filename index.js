@@ -9,14 +9,15 @@ import {
 } from './src/core.js';
 
 import { validateBackendUrl } from './src/connection.js';
+import { diffText } from './src/diff.js';
 import { readPresetCatalog } from './src/presets.js';
 
 const MODULE_NAME = 'st_vertex_polish';
 let sessionToken = '';
 const TOKEN_SESSION_KEY = 'stvp.token.session';
 const TOKEN_LOCAL_KEY = 'stvp.token.local';
-const MAX_INPUT_CHARS = 20000;
-const CLIENT_TIMEOUT_MS = 90000;
+const MAX_INPUT_CHARS = 100000;
+const CLIENT_TIMEOUT_MS = 240000;
 
 import { DEFAULT_MODELS, buildModelList, validModelId, isLegacyGemini } from './src/models.js';
 
@@ -39,6 +40,11 @@ const state = {
   pending: null,
   undo: null,
   presetCatalog: null,
+  drafts: [],
+  draftIndex: -1,
+  originSnapshot: null,
+  lastPayload: null,
+  lastDiagnostic: null,
   remoteModels: [],
   defaultModel: '',
 };
@@ -194,6 +200,8 @@ function setBusy(busy) {
   }
   ui.run.disabled = Boolean(busy);
   ui.run.textContent = busy ? '润色中…' : '开始润色';
+  if ($('stvp-refine')) $('stvp-refine').disabled = Boolean(busy);
+  if ($('stvp-apply') && busy) $('stvp-apply').disabled = true;
 }
 
 function hideResult() {
@@ -492,9 +500,9 @@ async function getPresetByName(name) {
   return readPresetCatalog(getContextOrThrow()).catalog.get(name) || null;
 }
 
-async function buildRequest() {
+async function buildRequest(targetOverride = null) {
   const context = getContextOrThrow();
-  const target = pickTargetMessage(context.chat);
+  const target = targetOverride || pickTargetMessage(context.chat);
   if (!target) {
     throw new Error('当前聊天没有可润色的 AI 回复。');
   }
@@ -530,7 +538,7 @@ async function buildRequest() {
 
   const composed = composeRequest({
     presetText: presetInfo.text,
-    customPrompt: getSettings().customPrompt,
+    customPrompt: getSettings().customPrompt + '\n' + ($('stvp-once')?.value || ''),
     targetText: target.text,
     maxInputChars: MAX_INPUT_CHARS,
   });
@@ -544,7 +552,7 @@ async function buildRequest() {
     model,
     presetInfo,
     composed,
-    sampling: readSampling(preset, target.text.length),
+    sampling: { ...readSampling(preset, target.text.length), maxOutputTokens: Math.max(256, Math.min(32768, Number($('stvp-output-budget')?.value) || 8192)) },
   };
 }
 
@@ -577,7 +585,10 @@ function formatHttpError(response, data) {
   const base = map[data?.error] || `请求失败（HTTP ${response.status}）`;
   const detail = typeof data?.message === 'string' && data.message ? `：${data.message}` : '';
   const requestId = typeof data?.requestId === 'string' ? `（请求 ${data.requestId.slice(0, 8)}）` : '';
-  return `${base}${detail}${requestId}`;
+  const diagnostics = data?.diagnostics || {};
+  state.lastDiagnostic = { httpStatus: response.status, error: data?.error, requestId: data?.requestId, model: diagnostics.model, location: diagnostics.location, upstreamHttpStatus: diagnostics.upstreamHttpStatus, googleStatus: diagnostics.googleStatus };
+  const facts = [diagnostics.upstreamHttpStatus ? `Google HTTP ${diagnostics.upstreamHttpStatus}` : `HTTP ${response.status}`, diagnostics.googleStatus, diagnostics.model ? `模型 ${diagnostics.model}` : '', diagnostics.location ? `区域 ${diagnostics.location}` : '', diagnostics.action || ''].filter(Boolean);
+  return `${base}${detail}${requestId}\n${facts.join(' · ')}`;
 }
 
 function pendingStillValid(snapshot) {
@@ -596,14 +607,57 @@ function invalidatePending(message) {
     state.controller = null;
   }
   state.busy = false;
-  state.pending = null;
   setBusy(false);
-  hideResult();
+  if (state.pending) ui.apply.disabled = true;
   updateUndoButton();
   setStatus(message, 'warn');
 }
 
-async function runPolish() {
+function switchPage(page) {
+  for (const name of ['connection', 'preset', 'prompt', 'text']) {
+    $('stvp-page-' + name).classList.toggle('stvp-hidden', name !== page);
+    $('stvp-tab-' + name).classList.toggle('stvp-active', name === page);
+    $('stvp-tab-' + name).setAttribute?.('aria-selected', String(name === page));
+  }
+}
+
+function renderDraft() {
+  const draft = state.drafts[state.draftIndex];
+  if (!draft) return;
+  state.pending = { ...draft, snapshot: state.originSnapshot };
+  ui.original.textContent = state.originSnapshot.text;
+  ui.polished.textContent = draft.text;
+  ui.result.classList.remove('stvp-hidden');
+  ui.apply.disabled = !pendingStillValid(state.originSnapshot) || draft.truncated;
+  const versions = $('stvp-versions');
+  versions.innerHTML = '';
+  state.drafts.forEach((item, index) => versions.add(new Option(`版本 ${index + 1}${item.truncated ? ' · 截断' : ''}`, String(index))));
+  versions.value = String(state.draftIndex);
+  renderDiff();
+}
+
+function renderDiff() {
+  if (!state.pending) return;
+  const previous = $('stvp-compare').value === 'previous' && state.draftIndex > 0;
+  const base = previous ? state.drafts[state.draftIndex - 1].text : state.originSnapshot.text;
+  const container = $('stvp-diff');
+  container.replaceChildren?.();
+  for (const op of diffText(base, state.pending.text)) {
+    const span = document.createElement(op.type === 'remove' ? 'del' : op.type === 'add' ? 'ins' : 'span');
+    span.className = 'stvp-diff-' + op.type;
+    span.textContent = op.text;
+    container.append(span);
+  }
+}
+
+function loadSource() {
+  const target = pickTargetMessage(getContextOrThrow().chat);
+  $('stvp-source').textContent = target?.text || '没有可润色回复';
+  $('stvp-source-count').textContent = target ? `${target.text.length.toLocaleString()} 字符` : '';
+  refreshTargetLabel();
+}
+
+async function runPolish(refine = false) {
   if (state.busy) {
     return;
   }
@@ -619,6 +673,7 @@ async function runPolish() {
   ui.meta.textContent = '';
   if (!baseUrl) {
     showError('请先在“连接设置”里填写后端地址。');
+    switchPage('connection');
     ui.settings.open = true;
     return;
   }
@@ -629,15 +684,32 @@ async function runPolish() {
     return;
   }
 
-  state.pending = null;
-  hideResult();
+  const previousDraft = refine ? state.pending : null;
+  if (refine && (!previousDraft || !$('stvp-followup').value.trim())) {
+    showError('请先生成草稿，并填写继续修改要求。');
+    return;
+  }
   state.busy = true;
   setBusy(true);
   setStatus('准备请求…');
 
   let built;
   try {
-    built = await buildRequest();
+    built = await buildRequest(refine ? { index: state.originSnapshot.index, text: state.originSnapshot.text, swipeId: state.originSnapshot.swipeId, name: state.originSnapshot.name, message: { send_date: state.originSnapshot.sendDate } } : null);
+    if (refine) {
+      built.composed = composeRequest({
+        presetText: built.presetInfo.text,
+        customPrompt: getSettings().customPrompt + '\n' + $('stvp-once').value + '\n继续修改要求：' + $('stvp-followup').value,
+        targetText: previousDraft.text,
+        maxInputChars: MAX_INPUT_CHARS,
+      });
+      if (built.composed.error) throw new Error(built.composed.error);
+      built.composed.prompt += '\n\n【最初原文，仅用于核对事实，不需重复输出】\n' + state.originSnapshot.text;
+      built.composed.chars = built.composed.prompt.length + built.composed.systemInstruction.length;
+      if (built.composed.error || built.composed.chars > MAX_INPUT_CHARS) throw new Error(built.composed.error || '继续修改请求超过 100,000 字符，请缩短要求或正文。');
+    }
+    state.lastPayload = { model: built.model, systemInstruction: built.composed.systemInstruction, prompt: built.composed.prompt, ...built.sampling };
+    $('stvp-payload').textContent = JSON.stringify(state.lastPayload, null, 2);
   } catch (error) {
     state.busy = false;
     setBusy(false);
@@ -647,7 +719,7 @@ async function runPolish() {
   }
 
   const context = getContextOrThrow();
-  const snapshot = {
+  const snapshot = refine ? state.originSnapshot : {
     chatId: context.chatId,
     index: built.target.index,
     swipeId: built.target.swipeId,
@@ -698,24 +770,19 @@ async function runPolish() {
     if (!polished) {
       throw new Error('后端返回了空结果。');
     }
-    if (!pendingStillValid(snapshot)) {
-      setStatus('聊天已变化，结果已丢弃', 'warn');
-      return;
-    }
-
-    state.pending = {
-      snapshot,
-      text: polished,
-      model: typeof data?.model === 'string' ? data.model : '',
-      truncated: Boolean(data?.truncated),
-    };
-    ui.original.textContent = snapshot.text;
-    ui.polished.textContent = polished;
-    ui.apply.disabled = false;
-    ui.result.classList.remove('stvp-hidden');
+    if (!refine) { state.originSnapshot = snapshot; state.drafts = []; }
+    const draft = { text: polished, model: typeof data?.model === 'string' ? data.model : '', truncated: Boolean(data?.truncated) };
+    state.drafts.push(draft);
+    if (state.drafts.length > 10) state.drafts.shift();
+    state.draftIndex = state.drafts.length - 1;
+    renderDraft();
+    switchPage('text');
     ui.undo.disabled = !state.undo;
+    if (!pendingStillValid(snapshot)) setStatus('结果已保留为草稿，原消息变化，不能替换', 'warn');
 
-    if (state.pending.truncated) {
+    if (!pendingStillValid(snapshot)) {
+      setStatus('草稿已保留；目标消息已变化，禁止替换', 'warn');
+    } else if (state.pending.truncated) {
       setStatus('完成，但输出可能被截断', 'warn');
     } else {
       setStatus(
@@ -797,9 +864,7 @@ async function applyPolish() {
     original: originalText,
     applied: appliedText,
   };
-  state.pending = null;
   ui.apply.disabled = true;
-  ui.result.classList.add('stvp-hidden');
   updateUndoButton();
   setStatus('已替换，可撤销', 'ok');
   refreshTargetLabel();
@@ -868,10 +933,9 @@ function onChatChanged() {
   state.controller?.abort();
   state.controller = null;
   state.busy = false;
-  state.pending = null;
   state.undo = null;
   setBusy(false);
-  hideResult();
+  if (state.pending) ui.apply.disabled = true;
   updateUndoButton();
   clearError();
   setStatus('');
@@ -939,7 +1003,12 @@ function mountUi() {
           <button id="stvp-close" type="button" title="关闭" aria-label="关闭">×</button>
         </div>
       </header>
+      <nav class="stvp-tabs" aria-label="工作台页面">
+        <button id="stvp-tab-connection" type="button">连接设置</button><button id="stvp-tab-preset" type="button">预设设置</button><button id="stvp-tab-prompt" type="button">提示词设置</button><button id="stvp-tab-text" type="button">正文设置</button>
+      </nav>
       <div id="stvp-body" class="stvp-body">
+        <section id="stvp-page-connection" class="stvp-page">
+        <p class="stvp-eyebrow">CONNECTION · 私人 Vertex 通道</p>
         <details id="stvp-settings" class="stvp-settings">
           <summary>连接设置</summary>
           <label class="stvp-field">
@@ -962,14 +1031,6 @@ function mountUi() {
 
         <div class="stvp-row">
           <label class="stvp-field stvp-grow">
-            <span>酒馆预设</span>
-            <select id="stvp-preset"></select>
-          </label>
-          <button id="stvp-refresh" type="button" class="stvp-secondary">刷新</button>
-        </div>
-
-        <div class="stvp-row">
-          <label class="stvp-field stvp-grow">
             <span>模型</span>
             <select id="stvp-model"></select>
           </label>
@@ -983,6 +1044,19 @@ function mountUi() {
           <button id="stvp-model-add" type="button">添加并选中</button>
         </div>
 
+        <label class="stvp-field"><span>输出预算（含模型思考）</span><input id="stvp-output-budget" type="number" min="256" max="32768" value="8192"></label>
+        <p class="stvp-hint">验证连接不生成文字；润色与继续修改会计费。输出预算仍受后端和模型能力限制。</p>
+        </section>
+        <section id="stvp-page-preset" class="stvp-page stvp-hidden">
+        <p class="stvp-eyebrow">PRESET · 独立请求规则</p>
+        <div class="stvp-row">
+          <label class="stvp-field stvp-grow">
+            <span>酒馆预设</span>
+            <select id="stvp-preset"></select>
+          </label>
+          <button id="stvp-refresh" type="button" class="stvp-secondary">刷新</button>
+        </div>
+
         <details id="stvp-entry-editor" class="stvp-entry-editor stvp-hidden">
           <summary><span>预设条目开关</span><span id="stvp-entry-count" class="stvp-entry-count"></span></summary>
           <div class="stvp-entry-toolbar">
@@ -993,30 +1067,47 @@ function mountUi() {
           <div id="stvp-entry-list" class="stvp-entry-list"></div>
         </details>
 
+        </section>
+        <section id="stvp-page-prompt" class="stvp-page stvp-hidden">
+        <p class="stvp-eyebrow">PROMPTS · 保留事实，调整表达</p>
         <label class="stvp-field">
           <span>自定义润色要求</span>
           <textarea id="stvp-custom" rows="3" maxlength="4000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea>
         </label>
 
+        <label class="stvp-field"><span>本次补充要求（不持久保存）</span><textarea id="stvp-once" rows="3" placeholder="例如：这次不要缩短对白"></textarea></label>
+        <button id="stvp-inspect" type="button">组装并查看发送内容（不调用 AI）</button>
+        <details><summary>本次发送内容（不含凭据）</summary><pre id="stvp-payload" class="stvp-text"></pre></details>
+        </section>
+        <section id="stvp-page-text" class="stvp-page stvp-hidden">
+        <p class="stvp-eyebrow">MANUSCRIPT · 每次修改都可回看</p>
+        <div class="stvp-actions"><button id="stvp-load-source" type="button">读取最新回复</button><span id="stvp-source-count" class="stvp-hint"></span></div>
+        <details><summary>当前酒馆原文</summary><pre id="stvp-source" class="stvp-text"></pre></details>
         <div class="stvp-actions">
           <button id="stvp-run" type="button" class="stvp-primary">开始润色</button>
-          <span id="stvp-status" class="stvp-status" role="status"></span>
+          <button id="stvp-cancel" type="button">取消请求</button>
         </div>
 
-        <div id="stvp-meta" class="stvp-hint"></div>
-        <div id="stvp-error" class="stvp-error stvp-hidden" role="alert"></div>
+
 
         <div id="stvp-result" class="stvp-result stvp-hidden">
+          <div class="stvp-row"><label class="stvp-field stvp-grow"><span>草稿版本（最近 10 版）</span><select id="stvp-versions"></select></label><button id="stvp-copy-result" type="button">复制结果</button></div>
+          <label class="stvp-field"><span>比较基准</span><select id="stvp-compare"><option value="original">最初原文</option><option value="previous">上一版</option></select></label>
+          <div class="stvp-diff-legend"><span>黄色：新增</span><span>红色＋删除线：删除</span></div><div id="stvp-diff" class="stvp-text stvp-diff"></div>
           <div class="stvp-label">原文</div>
           <div id="stvp-original" class="stvp-text"></div>
           <div class="stvp-label">润色结果</div>
-          <div id="stvp-polished" class="stvp-text"></div>
+          <div id="stvp-polished" class="stvp-text" contenteditable="true" role="textbox" aria-label="可编辑润色结果"></div>
           <div class="stvp-actions">
             <button id="stvp-apply" type="button" class="stvp-primary" disabled>替换当前回复</button>
             <button id="stvp-undo" type="button" class="stvp-secondary" disabled>撤销上次替换</button>
           </div>
         </div>
+        <label class="stvp-field"><span>继续修改要求</span><textarea id="stvp-followup" rows="2" placeholder="保留这一版，把第二段改得更自然…"></textarea></label>
+        <button id="stvp-refine" type="button">继续修改（产生新版本）</button>
+        </section>
       </div>
+      <footer class="stvp-footer"><span id="stvp-status" class="stvp-status" role="status">就绪</span><div id="stvp-meta" class="stvp-hint"></div><div id="stvp-error" class="stvp-error stvp-hidden" role="alert"></div><button id="stvp-copy-diagnostic" type="button">复制脱敏诊断</button></footer>
     </dialog>
   `;
   document.body.append(root);
@@ -1050,6 +1141,30 @@ function mountUi() {
     undo: $('stvp-undo'),
   };
 
+  for (const name of ['connection', 'preset', 'prompt', 'text']) $('stvp-tab-' + name).addEventListener('click', () => switchPage(name));
+  $('stvp-load-source').addEventListener('click', loadSource);
+  $('stvp-refine').addEventListener('click', () => runPolish(true).catch(error => showError(error.message)));
+  $('stvp-cancel').addEventListener('click', () => { state.controller?.abort(); setStatus('正在取消…', 'warn'); });
+  $('stvp-versions').addEventListener('change', () => { state.draftIndex = Number($('stvp-versions').value); renderDraft(); });
+  $('stvp-compare').addEventListener('change', renderDiff);
+  ui.polished.addEventListener('input', () => {
+    if (!state.pending) return;
+    state.pending.text = ui.polished.textContent;
+    state.drafts[state.draftIndex].text = state.pending.text;
+    renderDiff();
+  });
+  $('stvp-copy-diagnostic').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(state.lastDiagnostic || { status: '没有服务器诊断记录' }, null, 2)); setStatus('已复制状态码、模型、区域与请求标识，不含正文和口令', 'ok'); }
+    catch { showError('剪贴板不可用，请复制界面错误提示；不要分享口令。'); }
+  });
+  $('stvp-copy-result').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(state.pending?.text || ''); setStatus('结果已复制', 'ok'); }
+    catch { showError('剪贴板不可用，请长按结果文字复制。'); }
+  });
+  $('stvp-inspect').addEventListener('click', async () => {
+    try { const built = await buildRequest(); $('stvp-payload').textContent = JSON.stringify({ model: built.model, ...built.composed, ...built.sampling }, null, 2); setStatus('已组装，不调用 AI', 'ok'); }
+    catch (error) { showError(error.message); }
+  });
   $('stvp-theme').addEventListener('click', toggleTheme);
   $('stvp-min').addEventListener('click', () => {
     ui.panel.classList.toggle('stvp-minimized');
@@ -1191,6 +1306,11 @@ async function init() {
   ui.remember.checked = Boolean(settings.rememberToken);
   ui.custom.value = settings.customPrompt;
   applyTheme();
+  switchPage('text');
+  loadSource();
+  globalThis.addEventListener?.('beforeunload', event => {
+    if (state.drafts.length) { event.preventDefault(); event.returnValue = ''; }
+  });
 
   await refreshPresets();
   await refreshModels({ silent: true });

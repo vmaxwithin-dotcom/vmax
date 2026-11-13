@@ -1,3 +1,5 @@
+import { safeGoogleStatus } from './diagnostics.js';
+
 export class VertexError extends Error {
   constructor(kind, message, meta = {}) {
     super(message);
@@ -104,7 +106,7 @@ export function createVertexClient({ config, getAccessToken, fetchImpl = globalT
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), config.requestTimeoutMs ?? 60000);
+    const timer = setTimeout(() => controller.abort(), config.requestTimeoutMs ?? 180000);
     let response;
     let raw = '';
     try {
@@ -138,7 +140,7 @@ export function createVertexClient({ config, getAccessToken, fetchImpl = globalT
     if (!response.ok) {
       throw new VertexError('upstream', `Vertex HTTP ${response.status}`, {
         status: response.status,
-        detail: typeof data?.error?.message === 'string' ? data.error.message.slice(0, 500) : '',
+        googleStatus: safeGoogleStatus(data?.error?.status, response.status),
       });
     }
 

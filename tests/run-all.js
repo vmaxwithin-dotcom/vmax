@@ -2,6 +2,8 @@ import './core.test.js';
 import './connection.test.js';
 import './presets.test.js';
 import './models.test.js';
+import './diff.test.js';
+import '../backend/test/diagnostics.test.js';
 import './ui-smoke.test.js';
 import '../backend/test/vertex.test.js';
 import '../backend/test/google-auth.test.js';

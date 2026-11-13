@@ -5,7 +5,7 @@
  * plain `node --test`.
  */
 
-export const DEFAULT_MAX_INPUT_CHARS = 20000;
+export const DEFAULT_MAX_INPUT_CHARS = 100000;
 
 export const BASE_TASK_INSTRUCTION = [
   '你是文字润色助手。用户会给你一段角色扮演聊天中的 AI 回复。',
