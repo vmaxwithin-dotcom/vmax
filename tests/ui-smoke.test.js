@@ -118,8 +118,8 @@ function registerIds(html) {
 const documentStub = {
   readyState: 'complete',
   body: {
-    append() {
-      // No-op.
+    append(child) {
+      if (child?.id) elements.set(child.id, child);
     },
   },
   createElement() {
@@ -242,6 +242,10 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   await ready[0]();
   await tick();
 
+  assert.equal(document.getElementById('stvp-root').dataset.theme, 'dark');
+  document.getElementById('stvp-theme').click();
+  assert.equal(document.getElementById('stvp-root').dataset.theme, 'light');
+
   const panel = document.getElementById('stvp-panel');
   document.getElementById('stvp-menu-entry').click();
   assert.equal(panel.open, true);
@@ -254,6 +258,8 @@ test('extension UI wiring: init, polish, replace, undo and stale-result protecti
   assert.equal(preset.options.length, 2);
   assert.equal(preset.value, 'P1');
   assert.equal(document.getElementById('stvp-target').textContent.includes('第 1 条'), true);
+  assert.equal(document.getElementById('stvp-entry-editor').classList.contains('stvp-hidden'), false);
+  assert.match(document.getElementById('stvp-entry-count').textContent, /启用/);
 
   const model = document.getElementById('stvp-model');
   assert.equal(model.options.length, 8);

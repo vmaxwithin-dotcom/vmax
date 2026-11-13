@@ -4,6 +4,7 @@ import {
   buildPresetInstruction,
   composeRequest,
   getMessageText,
+  getPresetEntries,
   pickTargetMessage,
   readSampling,
   resolvePromptOrder,
@@ -96,6 +97,23 @@ test('buildPresetInstruction uses the character-specific order when present', ()
   });
   assert.equal(result.text, '');
   assert.equal(result.used, 0);
+});
+
+test('preset entry editor exposes markers and empty entries without changing the source', () => {
+  const result = getPresetEntries(preset, { characterId: 0 });
+  assert.equal(result.orderFound, true);
+  assert.deepEqual(result.entries.map(entry => entry.identifier), ['charDescription', 'main', 'jailbreak', 'chatHistory', 'nsfw']);
+  assert.equal(result.entries[0].marker, true);
+  assert.equal(result.entries[2].baseEnabled, false);
+  assert.equal(result.entries[4].empty, true);
+});
+
+test('enabledOverrides can disable and re-enable text entries for one request', () => {
+  const disabled = buildPresetInstruction(preset, { characterId: 0, enabledOverrides: { main: false } });
+  assert.equal(disabled.text, '');
+  const enabled = buildPresetInstruction(preset, { characterId: 0, enabledOverrides: { main: true, jailbreak: true } });
+  assert.match(enabled.text, /Write as \{\{char\}\}/);
+  assert.match(enabled.text, /Stay in character/);
 });
 
 test('buildPresetInstruction falls back to the prompts array when no order exists', () => {

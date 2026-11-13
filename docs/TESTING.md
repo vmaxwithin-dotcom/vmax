@@ -1,8 +1,8 @@
 # 测试记录
 
-## 0.3.0 补充
+## 0.4.0 补充
 
-44 项测试通过，新增 HTTPS/嵌入秘密地址校验；假 DOM 测试覆盖菜单入口、无需等待 APP_READY 的启动路径、禁止请求重定向、不带 Cookie/Referer 和口令不回填输入框。此为模拟测试，不代表 APK 真机通过。官方源码本轮网络获取失败，菜单选择器按用户提供按钮及标准菜单容器适配，保留设置区和悬浮兜底；需用户 APK 验证。
+48 项测试通过。新增真实 `PresetManager` 名称索引/数组与 JSON 字符串读取、预设条目开关覆盖、日夜主题切换、显式保存口令、失焦不丢口令、401 后恢复连接。仍为模拟测试，未在安卓 APK 真机验证。
 
 测试日期：2026-11-12（Asia/Shanghai）
 Node.js：v24.21.0（本机捆绑运行时）
@@ -24,8 +24,8 @@ node tests/run-all.js
 结果：
 
 ```
-tests 43
-pass 43
+tests 48
+pass 48
 fail 0
 ```
 
@@ -33,8 +33,10 @@ fail 0
 
 | 套件 | 数量 | 覆盖内容 |
 | --- | --- | --- |
-| `tests/core.test.js` | 11 | 当前 swipe 取文、最新 AI 消息选择、`prompt_order` 解析、marker/空条目/禁用条目跳过、宏替换、请求拼装、输入上限、采样钳制、快照校验 |
-| `tests/ui-smoke.test.js` | 1 | 假 DOM 下的扩展接线：初始化、预设下拉、模型下拉、润色请求、替换、撤销、迟到结果丢弃、swipe 只改当前版本 |
+| `tests/core.test.js` | 13 | 当前 swipe 取文、最新 AI 消息选择、`prompt_order` 解析、marker/空条目/禁用条目跳过、条目列表与覆盖开关、宏替换、请求拼装、输入上限、采样钳制、快照校验 |
+| `tests/ui-smoke.test.js` | 1 | 假 DOM 下的扩展接线：初始化、预设/模型下拉、日夜主题、条目编辑器、润色请求、替换、撤销、迟到结果丢弃、swipe 只改当前版本、显式保存口令与 401 恢复 |
+| `tests/connection.test.js` | 1 | HTTPS 与地址中嵌入秘密/参数校验 |
+| `tests/presets.test.js` | 2 | 真实 name:index 映射、数组、JSON 字符串、只读克隆、管理器不可用报错 |
 | `backend/test/vertex.test.js` | 8 | Vertex URL（区域 / global）、`promptFeedback` 与 `finishReason` 安全拦截、`MAX_TOKENS` 截断、请求体结构、上游 HTTP 错误、超时、token 失败 |
 | `backend/test/google-auth.test.js` | 3 | `service_account` JSON 校验、RS256 JWT 签名与验签、token 缓存、OAuth 失败不泄露私钥 |
 | `backend/test/config.test.js` | 3 | 默认值、来源列表解析、口令长度、数值/模型/区域校验 |

@@ -99,17 +99,7 @@ export function resolvePromptOrder(preset, { characterId, isGroup } = {}) {
   return orders[0];
 }
 
-/**
- * Flatten the enabled text prompts of a chat-completion preset into one
- * instruction block.
- *
- * Supported: prompt order, per-entry enabled flags, marker detection, empty
- * entries and SillyTavern macro substitution (through the injected substitute
- * function).
- * Not supported: world-info injection, STscript, dynamic markers, prompt
- * entries that only exist in another character's order.
- */
-export function buildPresetInstruction(preset, { substitute, characterId, isGroup } = {}) {
+function collectPresetEntries(preset, { characterId, isGroup } = {}) {
   const prompts = Array.isArray(preset?.prompts) ? preset.prompts : [];
   const byIdentifier = new Map();
   for (const prompt of prompts) {
@@ -129,18 +119,63 @@ export function buildPresetInstruction(preset, { substitute, characterId, isGrou
       if (!prompt) {
         continue;
       }
-      entries.push({ prompt, enabled: item.enabled !== false && prompt.enabled !== false });
+      entries.push({
+        prompt,
+        baseEnabled: item.enabled !== false && prompt.enabled !== false,
+        orderIndex: entries.length,
+      });
     }
   } else {
     for (const prompt of prompts) {
-      entries.push({ prompt, enabled: prompt?.enabled !== false });
+      entries.push({
+        prompt,
+        baseEnabled: prompt?.enabled !== false,
+        orderIndex: entries.length,
+      });
     }
   }
+  return { entries, orderFound: Boolean(order) };
+}
+
+/**
+ * Serializable entry list for the extension's checkbox editor.
+ * Markers and empty entries remain visible but cannot contribute text.
+ */
+export function getPresetEntries(preset, { characterId, isGroup } = {}) {
+  const { entries, orderFound } = collectPresetEntries(preset, { characterId, isGroup });
+  return {
+    orderFound,
+    entries: entries.map(({ prompt, baseEnabled, orderIndex }) => ({
+      identifier: prompt.identifier,
+      name: typeof prompt.name === 'string' && prompt.name.trim() ? prompt.name : prompt.identifier,
+      role: typeof prompt.role === 'string' ? prompt.role : 'system',
+      marker: Boolean(prompt.marker),
+      empty: !(typeof prompt.content === 'string' ? prompt.content.trim() : ''),
+      baseEnabled,
+      orderIndex,
+    })),
+  };
+}
+
+/**
+ * Flatten the enabled text prompts of a chat-completion preset into one
+ * instruction block.
+ *
+ * `enabledOverrides` is an optional { identifier: boolean } map from the UI.
+ * It only affects this extension's request; the SillyTavern preset is never
+ * modified.
+ */
+export function buildPresetInstruction(preset, { substitute, characterId, isGroup, enabledOverrides } = {}) {
+  const { entries, orderFound } = collectPresetEntries(preset, { characterId, isGroup });
+  const overrides = enabledOverrides && typeof enabledOverrides === 'object' ? enabledOverrides : {};
 
   const parts = [];
   let used = 0;
   let skipped = 0;
-  for (const { prompt, enabled } of entries) {
+  for (const { prompt, baseEnabled } of entries) {
+    const enabled = Object.hasOwn(overrides, prompt.identifier)
+      ? Boolean(overrides[prompt.identifier])
+      : baseEnabled;
     if (!enabled || Boolean(prompt.marker)) {
       skipped++;
       continue;
@@ -171,7 +206,7 @@ export function buildPresetInstruction(preset, { substitute, characterId, isGrou
     text: parts.join('\n\n'),
     used,
     skipped,
-    orderFound: Boolean(order),
+    orderFound,
   };
 }
 

@@ -2,6 +2,7 @@ import {
   buildPresetInstruction,
   composeRequest,
   getMessageText,
+  getPresetEntries,
   pickTargetMessage,
   readSampling,
   snapshotMatches,
@@ -33,6 +34,8 @@ const DEFAULT_SETTINGS = Object.freeze({
   customModel: '',
   customPrompt: '',
   rememberToken: false,
+  theme: 'auto',
+  presetEntryOverrides: {},
 });
 
 const state = {
@@ -41,6 +44,7 @@ const state = {
   busy: false,
   pending: null,
   undo: null,
+  presetCatalog: null,
 };
 
 let initialized = false;
@@ -76,19 +80,35 @@ function persistSettings() {
   }
 }
 
+function cleanToken(value) {
+  return String(value ?? '')
+    .replace(/^\s*Bearer\s+/i, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function tokenShapeError(token) {
+  if (!token) return '请粘贴后端私人访问口令。';
+  if (/^ghp_|^github_pat_/i.test(token)) return '这是 GitHub token，不是后端访问口令。';
+  if (token.startsWith('{')) return '这是 Google JSON 内容，不是后端访问口令；JSON 只应放在后端 Secret Manager。';
+  if (token.length < 16) return '口令太短，请从 Secret Manager 复制完整值。';
+  return '';
+}
+
 function readToken() {
   if (sessionToken) return sessionToken;
   try {
     // Migrate a prior session token into memory, then remove stored copies.
-    sessionToken = sessionStorage.getItem(TOKEN_SESSION_KEY) || '';
+    sessionToken = cleanToken(sessionStorage.getItem(TOKEN_SESSION_KEY) || '');
     sessionStorage.removeItem(TOKEN_SESSION_KEY);
-    if (!sessionToken && getSettings().rememberToken) sessionToken = localStorage.getItem(TOKEN_LOCAL_KEY) || '';
+    if (!sessionToken && getSettings().rememberToken) sessionToken = cleanToken(localStorage.getItem(TOKEN_LOCAL_KEY) || '');
   } catch { /* Storage may be disabled. */ }
   return sessionToken;
 }
 
 function writeToken(value) {
-  sessionToken = String(value ?? '').trim();
+  sessionToken = cleanToken(value);
   try {
     sessionStorage.removeItem(TOKEN_SESSION_KEY);
     if (getSettings().rememberToken) localStorage.setItem(TOKEN_LOCAL_KEY, sessionToken);
@@ -105,8 +125,9 @@ function saveConnectionCredentials() {
   try {
     const baseUrl = normalizeBaseUrl(ui.url.value);
     if (!baseUrl) throw new Error('请先填写你的 Cloud Run 后端地址。');
-    const token = ui.token.value.trim() || readToken();
-    if (!token) throw new Error('请粘贴后端私人访问口令，不是 GitHub token 或 Google JSON。');
+    const token = cleanToken(ui.token.value) || readToken();
+    const tokenError = tokenShapeError(token);
+    if (tokenError) throw new Error(tokenError);
     getSettings().backendUrl = baseUrl;
     getSettings().rememberToken = ui.remember.checked;
     ui.url.value = baseUrl;
@@ -221,6 +242,7 @@ async function refreshPresets() {
   setStatus('正在读取酒馆聊天补全预设…');
   try {
     const { catalog, active } = readPresetCatalog(getContextOrThrow());
+    state.presetCatalog = catalog;
     const names = [...catalog.keys()].sort((a, b) => a.localeCompare(b));
     const saved = getSettings().presetName;
     ui.preset.innerHTML = '';
@@ -229,6 +251,7 @@ async function refreshPresets() {
     ui.preset.value = saved === '__none__' ? saved : names.includes(saved) ? saved : names.includes(active) ? active : names[0] || '__none__';
     getSettings().presetName = ui.preset.value;
     persistSettings();
+    renderPresetEntries();
     setStatus(names.length ? `已读取 ${names.length} 个酒馆预设` : '没有保存的聊天补全预设，可先使用自定义要求', names.length ? 'ok' : 'warn');
   } catch (error) {
     if (!ui.preset.options.length) {
@@ -240,6 +263,96 @@ async function refreshPresets() {
     button.disabled = false;
     button.textContent = '刷新';
   }
+}
+
+function presetOverrides(name) {
+  const settings = getSettings();
+  if (!settings.presetEntryOverrides || typeof settings.presetEntryOverrides !== 'object') {
+    settings.presetEntryOverrides = {};
+  }
+  if (!settings.presetEntryOverrides[name] || typeof settings.presetEntryOverrides[name] !== 'object') {
+    settings.presetEntryOverrides[name] = {};
+  }
+  return settings.presetEntryOverrides[name];
+}
+
+function updateEntrySummary(entries, overrides) {
+  if (!ui?.entryCount) return;
+  const enabled = entries.filter(entry => {
+    if (entry.marker || entry.empty) return false;
+    return Object.hasOwn(overrides, entry.identifier) ? Boolean(overrides[entry.identifier]) : entry.baseEnabled;
+  }).length;
+  ui.entryCount.textContent = `${enabled}/${entries.filter(entry => !entry.marker && !entry.empty).length} 启用`;
+}
+
+function renderPresetEntries() {
+  if (!ui?.entryEditor || !ui.entryList) return;
+  const name = ui.preset.value;
+  const preset = name === '__none__' ? null : state.presetCatalog?.get(name) || null;
+  if (!preset) {
+    ui.entryEditor.classList.add('stvp-hidden');
+    ui.entryList.replaceChildren?.();
+    return;
+  }
+
+  const context = getContextOrThrow();
+  const { entries } = getPresetEntries(preset, {
+    characterId: context.characterId,
+    isGroup: Boolean(context.groupId),
+  });
+  const overrides = presetOverrides(name);
+
+  ui.entryEditor.classList.remove('stvp-hidden');
+  ui.entryList.replaceChildren?.();
+  for (const entry of entries) {
+    const row = document.createElement('label');
+    row.className = 'stvp-entry-row';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = Object.hasOwn(overrides, entry.identifier)
+      ? Boolean(overrides[entry.identifier])
+      : entry.baseEnabled;
+    checkbox.disabled = entry.marker || entry.empty;
+    checkbox.addEventListener('change', () => {
+      overrides[entry.identifier] = checkbox.checked;
+      getSettings().presetEntryOverrides[name] = overrides;
+      persistSettings();
+      updateEntrySummary(entries, overrides);
+    });
+
+    const text = document.createElement('span');
+    text.className = 'stvp-entry-name';
+    text.textContent = entry.name;
+    const meta = document.createElement('span');
+    meta.className = 'stvp-entry-meta';
+    meta.textContent = entry.marker ? '占位·跳过' : entry.empty ? '空·跳过' : entry.role;
+    row.append(checkbox, text, meta);
+    ui.entryList.append(row);
+  }
+  updateEntrySummary(entries, overrides);
+}
+
+function applyTheme() {
+  if (!ui?.panel) return;
+  const root = document.getElementById('stvp-root');
+  if (!root) return;
+  const theme = getSettings().theme;
+  const prefersDark = globalThis.matchMedia?.('(prefers-color-scheme: dark)')?.matches ?? true;
+  const dark = theme === 'dark' || (theme === 'auto' && prefersDark);
+  root.dataset.theme = dark ? 'dark' : 'light';
+  const button = $('stvp-theme');
+  if (button) {
+    button.textContent = dark ? '☀' : '☾';
+    button.title = dark ? '切换到日间' : '切换到夜间';
+  }
+}
+
+function toggleTheme() {
+  const root = document.getElementById('stvp-root');
+  const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  getSettings().theme = next;
+  persistSettings();
+  applyTheme();
 }
 
 function toggleCustomModel() {
@@ -304,14 +417,16 @@ async function refreshModels({ silent = false } = {}) {
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 15000);
   try {
     const baseUrl = normalizeBaseUrl(ui.url.value);
-    const token = (ui.token.value.trim() || readToken()).trim();
+    const token = cleanToken(ui.token.value) || readToken();
     if (!baseUrl) throw new Error('请先填写 Cloud Run 后端地址。');
-    if (!token) throw new Error('请先填写后端私人访问口令，再点击保存。');
+    const tokenError = tokenShapeError(token);
+    if (tokenError) throw new Error(tokenError);
     const response = await privateFetch(baseUrl, '/api/models', token, { signal: controller.signal });
     const data = await readJson(response);
     if (controller.signal.aborted) throw new Error('已取消连接验证。');
     if (response.status === 401) {
-      throw new Error('认证失败（401）：请重新复制 Secret Manager 中 polish-access-token 的值，粘贴到口令框并保存。不要使用 GitHub token 或 Google JSON。');
+      const requestId = typeof data?.requestId === 'string' ? `（请求 ${data.requestId.slice(0, 8)}）` : '';
+      throw new Error(`认证失败（401）${requestId}：口令与当前 Cloud Run revision 不一致。请重新从 Secret Manager 复制 polish-access-token；若刚更新过 Secret，需重新部署后端以加载最新版本。`);
     }
     if (!response.ok) throw new Error(formatHttpError(response, data));
     if (!Array.isArray(data?.models)) throw new Error('后端返回的模型列表格式不正确，请确认后端已更新。');
@@ -390,6 +505,7 @@ async function buildRequest() {
     },
     characterId: context.characterId,
     isGroup: Boolean(context.groupId),
+    enabledOverrides: presetName === '__none__' ? {} : presetOverrides(presetName),
   });
 
   const composed = composeRequest({
@@ -476,7 +592,7 @@ async function runPolish() {
   const settings = getSettings();
   const rawUrl = ui.url.value.trim() || settings.backendUrl;
   const baseUrl = normalizeBaseUrl(rawUrl);
-  const token = ui.token.value.trim() || readToken();
+  const token = cleanToken(ui.token.value) || readToken();
   settings.backendUrl = rawUrl;
   settings.customPrompt = ui.custom.value;
   persistSettings();
@@ -486,8 +602,9 @@ async function runPolish() {
     ui.settings.open = true;
     return;
   }
-  if (!token) {
-    showError('请先填写访问口令。');
+  const tokenError = tokenShapeError(token);
+  if (tokenError) {
+    showError(tokenError);
     ui.settings.open = true;
     return;
   }
@@ -798,6 +915,7 @@ function mountUi() {
           <span id="stvp-target" class="stvp-target">正在读取聊天…</span>
         </div>
         <div class="stvp-head-actions">
+          <button id="stvp-theme" type="button" title="切换日间/夜间" aria-label="切换日间/夜间">☾</button>
           <button id="stvp-min" type="button" title="收起" aria-label="收起">—</button>
           <button id="stvp-close" type="button" title="关闭" aria-label="关闭">×</button>
         </div>
@@ -844,6 +962,15 @@ function mountUi() {
           <input id="stvp-model-custom" type="text" placeholder="例如 gemini-3.8-flash" autocomplete="off" spellcheck="false">
         </label>
 
+        <details id="stvp-entry-editor" class="stvp-entry-editor stvp-hidden">
+          <summary><span>预设条目开关</span><span id="stvp-entry-count" class="stvp-entry-count"></span></summary>
+          <div class="stvp-entry-toolbar">
+            <span class="stvp-hint">只影响本扩展的润色请求，不会修改酒馆预设。</span>
+            <button id="stvp-entry-reset" type="button">恢复预设默认</button>
+          </div>
+          <div id="stvp-entry-list" class="stvp-entry-list"></div>
+        </details>
+
         <label class="stvp-field">
           <span>自定义润色要求</span>
           <textarea id="stvp-custom" rows="3" maxlength="4000" placeholder="例如：更口语化；保留第二人称；不要减少细节。"></textarea>
@@ -886,6 +1013,9 @@ function mountUi() {
     modelRefresh: $('stvp-model-refresh'),
     modelCustom: $('stvp-model-custom'),
     modelCustomWrap: $('stvp-model-custom-wrap'),
+    entryEditor: $('stvp-entry-editor'),
+    entryList: $('stvp-entry-list'),
+    entryCount: $('stvp-entry-count'),
     custom: $('stvp-custom'),
     run: $('stvp-run'),
     status: $('stvp-status'),
@@ -905,6 +1035,7 @@ function mountUi() {
       closePanel();
     }
   });
+  $('stvp-theme').addEventListener('click', toggleTheme);
   $('stvp-min').addEventListener('click', () => {
     ui.panel.classList.toggle('stvp-minimized');
   });
@@ -957,6 +1088,14 @@ function mountUi() {
   ui.preset.addEventListener('change', () => {
     getSettings().presetName = ui.preset.value;
     persistSettings();
+    renderPresetEntries();
+  });
+  $('stvp-entry-reset').addEventListener('click', () => {
+    const name = ui.preset.value;
+    if (name === '__none__') return;
+    delete getSettings().presetEntryOverrides?.[name];
+    persistSettings();
+    renderPresetEntries();
   });
   ui.modelRefresh.addEventListener('click', () => {
     refreshModels().catch(error => showError(error.message));
@@ -1028,6 +1167,7 @@ async function init() {
   ui.token.value = '';
   ui.remember.checked = Boolean(settings.rememberToken);
   ui.custom.value = settings.customPrompt;
+  applyTheme();
 
   await refreshPresets();
   await refreshModels({ silent: true });
